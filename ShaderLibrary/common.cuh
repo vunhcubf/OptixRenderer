@@ -5,6 +5,7 @@
 #include <vector_functions.h>
 #include <optix.h>
 #include <cuda/random.h>
+#include <curand_kernel.h>
 #include <cuda/helpers.h>
 #include "optix_device.h"
 /// @brief ///////////////////
@@ -27,7 +28,16 @@ enum MaterialType {
     MATERIAL_AREALIGHT,
     MATERIAL_OBJ
 };
-
+__device__ uint getLow4Bytes(uint64 value) {
+    return (uint)(value & 0xFFFFFFFF);
+}
+__device__ uint64 combineToUint64(uint high4Bytes, uint low4Bytes) {
+    return (((uint64)high4Bytes) << 32) | low4Bytes;
+}
+// 获取 uint64_t 的高 4 字节
+__device__ uint getHigh4Bytes(uint64 value) {
+    return (uint)((value >> 32) & 0xFFFFFFFF);
+}
 struct AreaLight {
     float3 P1, P2, P3, P4, Color;//p1,p2,p3,p4从下面看顺时针一圈
     float Area;
@@ -37,12 +47,83 @@ struct CameraData {
     float3                 cam_eye;
     float3                 cam_u, cam_v, cam_w;
 };
-
+struct SbtDataStruct
+{
+    CUdeviceptr DataPtr;
+};
 struct LaunchParametersDesc {
     CameraData cameraData;
     AreaLight areaLight;
 };
 
+
+struct GeometryBuffer {
+    CUdeviceptr Normal=(CUdeviceptr)nullptr;
+    CUdeviceptr Vertices = (CUdeviceptr)nullptr;
+    CUdeviceptr uv = (CUdeviceptr)nullptr;
+};
+struct HitInfo{ // 5 uint
+	CUdeviceptr SbtDataPtr;// 2 uint
+	uint PrimitiveID; // 1 uint
+	float2 TriangleCentroidCoord; // 2 uint
+ };
+struct RayGenData
+{
+    float r, g, b;
+    cudaTextureObject_t TestTex;
+};
+struct MissData {
+    float3 BackgroundColor;
+    float SkyBoxIntensity;
+    cudaTextureObject_t SkyBox;
+};
+struct BlueNoiseMapBuffer{
+    unsigned char* Data;
+    int width;
+    int height;
+    int channel;
+	template<uint channels>
+	__device__ void Sample(uint2 pixel_id,void* result);
+	template<>
+	__device__ void Sample<1>(uint2 pixel_id,void* result){
+		pixel_id.y=pixel_id.y%height;
+		pixel_id.x=pixel_id.x%width;
+		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
+		float* res=(float*)result;
+		res[0]=(Data[address_offset]/255.0f);
+	}
+	template<>
+	__device__ void Sample<2>(uint2 pixel_id,void* result){
+		pixel_id.y=pixel_id.y%height;
+		pixel_id.x=pixel_id.x%width;
+		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
+		float2* res=(float2*)result;
+		res->x=(Data[address_offset]/255.0f);
+		res->y=(Data[address_offset+1]/255.0f);
+	}
+	template<>
+	__device__ void Sample<3>(uint2 pixel_id,void* result){
+		pixel_id.y=pixel_id.y%height;
+		pixel_id.x=pixel_id.x%width;
+		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
+		float3* res=(float3*)result;
+		res->x=(Data[address_offset]/255.0f);
+		res->y=(Data[address_offset+1]/255.0f);
+		res->z=(Data[address_offset+2]/255.0f);
+	}
+	template<>
+	__device__ void Sample<4>(uint2 pixel_id,void* result){
+		pixel_id.y=pixel_id.y%height;
+		pixel_id.x=pixel_id.x%width;
+		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
+		float4* res=(float4*)result;
+		res->x=(Data[address_offset]/255.0f);
+		res->y=(Data[address_offset+1]/255.0f);
+		res->z=(Data[address_offset+2]/255.0f);
+		res->w=(Data[address_offset+3]/255.0f);
+	}
+	__device__ inline uint2 GetLoopSamplePixelId();
+};
 struct LaunchParameters {
     float3* IndirectOutputBuffer;
     uchar4* ImagePtr;
@@ -55,28 +136,11 @@ struct LaunchParameters {
     uint64 FrameNumber;
     uint Spp;
     uint MaxRecursionDepth;
-};
-struct GeometryBuffer {
-    CUdeviceptr Normal=(CUdeviceptr)nullptr;
-    CUdeviceptr Vertices = (CUdeviceptr)nullptr;
-    CUdeviceptr uv = (CUdeviceptr)nullptr;
+    // 随机数生成
+    uint64* PixelOffset;
+	BlueNoiseMapBuffer* BlueNoiseBuffer;
 };
 
-struct RayGenData
-{
-    float r, g, b;
-    cudaTextureObject_t TestTex;
-};
-struct MissData {
-    float3 BackgroundColor;
-    float SkyBoxIntensity;
-    cudaTextureObject_t SkyBox;
-};
-
-struct SbtDataStruct
-{
-    CUdeviceptr DataPtr;
-};
 //原理化BSDF
 struct Material
 {
@@ -106,7 +170,7 @@ struct ModelData {
 #define BXDF_RAY_TYPE_DIFF 1U
 #define BXDF_RAY_TYPE_SPEC 2U
 #define BXDF_RAY_TYPE_TRANS 4U
-extern "C" __constant__ LaunchParameters params;
+extern "C" __constant__ LaunchParameters RayTracingGlobalParams;
 
 enum PathTracerRayType {
 	RAYTYPE_RAYGEN,
@@ -121,6 +185,20 @@ struct PerRayData {
 	uint RayHitType;
 	float3 DebugData;
 };
+__device__ inline uint2 BlueNoiseMapBuffer::GetLoopSamplePixelId(){
+	uint3 id=optixGetLaunchIndex();
+	uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
+	uint64 pixeloffset=RayTracingGlobalParams.PixelOffset[threadid];
+	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
+	pixeloffset=pixeloffset%(width*height);
+	uint2 res=make_uint2(pixeloffset%width,pixeloffset/width);
+	res.x+=id.x;
+	res.y+=id.y;
+	res.y=res.y%height;
+	res.x=res.x%width;
+	return res;
+}
+#define SAMPLE_BLUENOISE_4D(x) RayTracingGlobalParams.BlueNoiseBuffer->Sample<4>(RayTracingGlobalParams.BlueNoiseBuffer->GetLoopSamplePixelId(),&x)
 template<typename T>
 static __forceinline__ __device__ T SampleTexture2D(cudaTextureObject_t tex, float u, float v) {
 	return tex2D<T>(tex, u, v);
@@ -241,14 +319,23 @@ static __forceinline__ __device__ float2 GetSkyBoxUv(float3 RayDir) {
 
 static __device__ float Rand(uint& seed) {
 	const uint3 id = optixGetLaunchIndex();
-	uint seed1 = tea<4>(id.y * params.Width + id.x, seed);
+	uint seed1 = tea<4>(id.y * RayTracingGlobalParams.Width + id.x, seed);
 	seed += 0xFC879023U;
 	return rnd(seed1);
 }
 static __device__ float3 RandomSamplePointOnLight(uint& Seed) {
 	float r1 = Rand(Seed);
 	float r2 = Rand(Seed);
-	AreaLight light = params.areaLight;
+	AreaLight light = RayTracingGlobalParams.areaLight;
+	return lerp(
+		lerp(light.P1, light.P2, r1),
+		lerp(light.P4, light.P3, r1),
+		r2);
+}
+static __device__ float3 RandomSamplePointOnLight(float2 rand) {
+	float r1 = rand.x;
+	float r2 = rand.y;
+	AreaLight light = RayTracingGlobalParams.areaLight;
 	return lerp(
 		lerp(light.P1, light.P2, r1),
 		lerp(light.P4, light.P3, r1),
@@ -257,6 +344,24 @@ static __device__ float3 RandomSamplePointOnLight(uint& Seed) {
 static __device__ float3 ImportanceSampleCosWeight(uint& Seed,float3 N) {
 	float phi = Rand(Seed);
 	float theta = Rand(Seed) * 2.0f * PI;
+	phi = asin(sqrt(phi));
+	float3 T;
+	if (N.x == 0 && N.z == 0) {
+		T = make_float3(0, N.z, -N.y);//x
+	}
+	else {
+		T = make_float3(N.z, 0, -N.x);//x
+	}
+	T = normalize(T);
+	float3 B = cross(N, T);//y
+	B = normalize(B);
+	float3 RayDir = T * sin(phi) * cos(theta) + B * sin(phi) * sin(theta) + N * saturate(cos(phi));
+	RayDir = normalize(RayDir);
+	return RayDir;
+}
+static __device__ float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
+	float phi = rand.x;
+	float theta = rand.y * 2.0f * PI;
 	phi = asin(sqrt(phi));
 	float3 T;
 	if (N.x == 0 && N.z == 0) {
@@ -349,3 +454,99 @@ static __device__ float3 refract(const float3 incident, const float3 normal, con
 	else
 		return eta * incident - (eta * dot(normal, incident) + sqrt(k)) * normal;
 }
+static __device__ void AccumulatePixelOffset(){
+	uint3 id=optixGetLaunchIndex();
+    uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
+	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
+}
+static __device__ uint64 FetchPixelOffset(){
+	uint3 id=optixGetLaunchIndex();
+    uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
+	return RayTracingGlobalParams.PixelOffset[threadid];
+}
+static __device__ float RndUniform(){
+	uint3 id=optixGetLaunchIndex();
+	curandStateXORWOW_t state;
+	uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
+	uint64 ThreadCount=RayTracingGlobalParams.Width*RayTracingGlobalParams.Height;
+	curand_init(RayTracingGlobalParams.Seed,
+		RayTracingGlobalParams.FrameNumber*100+RayTracingGlobalParams.PixelOffset[threadid],
+		threadid,&state);
+	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
+	return curand_uniform(&state);
+}
+
+struct SurfaceData{
+	float3 BaseColor;
+	float Roughness;
+	float3 NormalMap;
+	float Metallic;
+	float Specular;
+	float SpecularTint;
+	float AO=1.0f;
+	float3 Normal;
+	float3 GeometryNormal;
+	float2 TexCoord;
+	float3 Position;
+	float Transmission;
+	float ior;
+	__device__ void Load(HitInfo& hitInfo){
+		if(hitInfo.PrimitiveID==0xFFFFFFFF){return;}
+		ModelData* ModelDataptr = (ModelData*)(hitInfo.SbtDataPtr);
+		Specular = ModelDataptr->MaterialData->Specular;
+		SpecularTint = ModelDataptr->MaterialData->SpecularTint;
+		GeometryBuffer* GeometryDataPtr=ModelDataptr->GeometryData;
+
+		float2* UvPtr = (float2*)GeometryDataPtr->uv;
+		const uint& primIndex = hitInfo.PrimitiveID;
+		float3 Centrics = make_float3(
+			1 - hitInfo.TriangleCentroidCoord.x - hitInfo.TriangleCentroidCoord.y, 
+			hitInfo.TriangleCentroidCoord.x, 
+			hitInfo.TriangleCentroidCoord.y);
+
+		TexCoord= UvPtr[3 * primIndex] * Centrics.x + UvPtr[3 * primIndex+1] * Centrics.y + UvPtr[3 * primIndex+2] * Centrics.z;
+
+		float3* NormalPtr = (float3*)GeometryDataPtr->Normal;
+		float3& Normal1 = NormalPtr[3*primIndex];
+		float3& Normal2 = NormalPtr[3*primIndex+1];
+		float3& Normal3 = NormalPtr[3*primIndex+2];
+		Normal= normalize(Normal1 * Centrics.x + Normal2 * Centrics.y + Normal3 * Centrics.z);
+	
+		// 计算几何法线
+		float3* VerticesPtr = (float3*)GeometryDataPtr->Vertices;
+		float3& v1 = VerticesPtr[3 * primIndex];
+		float3& v2 = VerticesPtr[3 * primIndex + 1];
+		float3& v3 = VerticesPtr[3 * primIndex + 2];
+		GeometryNormal = normalize(cross(v1 - v2, v1 - v3));
+		Position=v1 * Centrics.x + v2 * Centrics.y + v3 * Centrics.z;
+		if (ModelDataptr->MaterialData->BaseColorMap != NO_TEXTURE_HERE) {
+			float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
+			BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
+		}
+		else {
+			BaseColor = ModelDataptr->MaterialData->BaseColor;
+		}
+		
+		if (ModelDataptr->MaterialData->ARMMap != NO_TEXTURE_HERE) {
+			float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->ARMMap, TexCoord.x, TexCoord.y);
+			Roughness = tmp.y;
+			Metallic = tmp.z;
+			AO = tmp.x;
+		}
+		else {
+			Roughness = ModelDataptr->MaterialData->Roughness;
+			Metallic = ModelDataptr->MaterialData->Metallic;
+		}
+		BaseColor *= AO;
+		Roughness = fmaxf(Roughness, 1e-3f);
+		Transmission = ModelDataptr->MaterialData->Transmission;
+		ior = ModelDataptr->MaterialData->Ior;
+		ior = fmaxf(ior, 1.0001f);
+		// 应用法线贴图
+		if (ModelDataptr->MaterialData->NormalMap != NO_TEXTURE_HERE) {
+			float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->NormalMap, TexCoord.x, TexCoord.y);
+			NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
+			Normal = UseNormalMap(Normal, NormalMap, 1.0f);
+		}
+	}
+};

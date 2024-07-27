@@ -1,7 +1,7 @@
 #include "common.cuh"
 #include "raytracing.cuh"
 #include "bxdf.cuh"
-
+#include "payload.cuh"
 enum BxdfType {
 	Dielectric,
 	Metal,
@@ -18,14 +18,14 @@ extern "C" __global__ void __closesthit__principled_bsdf()
 	// 对于上半球面，漫射和反射光线的pdf不为0，对于下半球面，折射光线的pdf不为0
 	PerRayData Data = FetchPerRayDataFromPayLoad();
 	if (GetModelDataPtr()->MaterialData->MaterialType == MATERIAL_AREALIGHT) {
-		Data.Radience = params.areaLight.Color;
+		Data.Radience = RayTracingGlobalParams.areaLight.Color;
 		Data.RayHitType = HIT_TYPE_LIGHT;
 		SetPerRayDataForPayLoad(Data);
 		return;
 	}
 	const uint3 Id = optixGetLaunchIndex();
 	// 使用轮盘赌决定是否停止
-	//float roulette_ps = params.MaxRecursionDepth / (params.MaxRecursionDepth + 1.0f);
+	//float roulette_ps = RayTracingGlobalParams.MaxRecursionDepth / (RayTracingGlobalParams.MaxRecursionDepth + 1.0f);
 	//float rand_for_roulette = Rand(Data.Seed);
 	//if (rand_for_roulette > roulette_ps) {
 	//	Data.Radience = make_float3(0);
@@ -116,7 +116,7 @@ extern "C" __global__ void __closesthit__principled_bsdf()
 	float3 RadienceIndirect = make_float3(0);
 	float rand_for_select_ray = Rand(Data.Seed);
 	float p;
-	if (Data.RecursionDepth < params.MaxRecursionDepth) {
+	if (Data.RecursionDepth < RayTracingGlobalParams.MaxRecursionDepth) {
 		// 处理间接光部分
 		switch (MatToTrace)
 		{
@@ -261,7 +261,7 @@ extern "C" __global__ void __closesthit__principled_bsdf()
 	
 	// 直接光
 	float3 RadienceDirect = make_float3(0);
-	float pdf_light = 1 / params.areaLight.Area;
+	float pdf_light = 1 / RayTracingGlobalParams.areaLight.Area;
 	if (MatToTrace != Glass) {
 		float3 SamplePoint = RandomSamplePointOnLight(Data.Seed);
 		float3 ray_dir_direct = normalize(SamplePoint - RayOrigin);
@@ -306,7 +306,7 @@ extern "C" __global__ void __closesthit__occluded() {
 	ModelData* modeldata_ptr = (ModelData*)HitGroupDataPtr->DataPtr;
 	PerRayData Data = FetchPerRayDataFromPayLoad();
 	if (modeldata_ptr->MaterialData->MaterialType == MATERIAL_AREALIGHT) {
-		Data.Radience = params.areaLight.Color;
+		Data.Radience = RayTracingGlobalParams.areaLight.Color;
 		Data.RayHitType = HIT_TYPE_LIGHT;
 	}
 	else {
@@ -315,4 +315,102 @@ extern "C" __global__ void __closesthit__occluded() {
 	}
 	Data.DebugData = make_float3(0.5);
 	SetPerRayDataForPayLoad(Data);
+}
+
+extern "C" __global__ void __raygen__principled_bsdf(){
+	// 没有显式递归的版本
+	// 主体为一个循环，循环开始时根据上一个循环或rg产生的射线方向进行一次追踪。
+	// 计算间接光的权重和直接光的辐射
+	const uint3 idx = optixGetLaunchIndex();
+	const uint3 dim = optixGetLaunchDimensions();
+	float3 RayOrigin, RayDirection;
+	float2 jitter = Hammersley(RayTracingGlobalParams.FrameNumber % 32, 32);
+	ComputeRayWithJitter(idx, dim, RayOrigin, RayDirection, jitter);
+
+	float3 Weight=make_float3(1.0f);
+	float3 Radience=make_float3(0.0f);
+	uint RecursionDepth=0;
+
+	float3 DebugColor;
+	bool FutureBxdfRayHitLight=false;
+	float LastMISWeight=1.0f;
+	// MIS需要知道发射的bxdf射线是否命中灯光
+	// 但是当前的模式是计算并保存下一次追踪的方向，追踪的结果不在这一次递归中给出
+	// 改为首先发射基础射线。在每帧追踪bxdf射线，返回bxdf结果后查看是否命中灯光，并将命中到的表面数据保存以便下一轮迭代使用
+	for(;RecursionDepth<RayTracingGlobalParams.MaxRecursionDepth;RecursionDepth++){
+		// 先追踪光线
+		HitInfo hitInfo;
+		TraceRay(hitInfo, RayOrigin, RayDirection,1e-3f, 0, 2, 0);
+		if(hitInfo.PrimitiveID==0xFFFFFFFF){
+			// 未命中
+			Radience+=Weight*make_float3(0.5f);
+			break;
+		}
+		else if(((ModelData*)hitInfo.SbtDataPtr)->MaterialData->MaterialType==MATERIAL_AREALIGHT){
+			Radience+=Weight*RayTracingGlobalParams.areaLight.Color;
+			break;
+		}
+		// 加载命中点
+		SurfaceData surfaceData;
+		surfaceData.Load(hitInfo);
+		
+		// 假设只考虑漫射
+		float4 bluenoise;
+		SAMPLE_BLUENOISE_4D(bluenoise);
+		uint seed=RayTracingGlobalParams.Seed+idx.x*+idx.y*RayTracingGlobalParams.Width+(RayTracingGlobalParams.FrameNumber)%0xFFFFFFFF;
+		bluenoise.x=Rand(seed);
+		bluenoise.y=Rand(seed);
+		bluenoise.z=Rand(seed);
+		RayDirection=ImportanceSampleCosWeight(make_float2(bluenoise.x,bluenoise.y),surfaceData.Normal);
+		RayOrigin=surfaceData.Position;
+
+		// 直接光
+		float3 SamplePoint = RandomSamplePointOnLight(make_float2(bluenoise.y,bluenoise.z));
+		float3 RayDirDirectLight = normalize(SamplePoint - RayOrigin);
+		float3 RadienceDirect=make_float3(0.0f);
+
+		
+		if (dot(surfaceData.Normal, RayDirDirectLight) > 1e-2f && RayDirDirectLight.z > 1e-2f) {
+			HitInfo hitInfoDirectLight;
+			TraceRay(hitInfoDirectLight, RayOrigin, RayDirDirectLight,1e-3f, 0, 2, 0);
+			HitLight=((ModelData*)(hitInfoDirectLight.SbtDataPtr))->MaterialData->MaterialType==MATERIAL_AREALIGHT;
+			float3 lightColor=HitLight ? RayTracingGlobalParams.areaLight.Color : make_float3(0.0f);
+			float Dw = RayTracingGlobalParams.areaLight.Area * saturate(dot(surfaceData.Normal, RayDirDirectLight) + 1e-4f) * saturate(RayDirDirectLight.z) / squared_length(RayOrigin - SamplePoint);
+			RadienceDirect = lightColor * Dw * surfaceData.BaseColor * REVERSE_PI;
+		}
+
+		// MIS
+		float PdfDiffuse=abs(dot(surfaceData.Normal,RayDirection))*REVERSE_PI;
+		float PdfLight = 1 / RayTracingGlobalParams.areaLight.Area;
+
+		float MISWeight=1.0f;
+		if (HitLight) {
+			MISWeight=PdfDiffuse / (PdfDiffuse + PdfLight);
+			RadienceDirect=(RadienceDirect * PdfLight) / (PdfDiffuse + PdfLight);
+		}
+		if(RecursionDepth==0){
+			DebugColor=make_float3(MISWeight);
+		}
+		Radience+=Weight*RadienceDirect;
+		Weight*=surfaceData.BaseColor*MISWeight;
+	}
+	uint pixel_id = idx.y * RayTracingGlobalParams.Width + idx.x;
+	RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = DebugColor;
+}
+
+extern "C" __global__ void __closesthit__fetch_hitinfo() {
+	HitInfo hitInfo;
+	hitInfo.PrimitiveID=optixGetPrimitiveIndex();
+	hitInfo.SbtDataPtr=((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;
+	hitInfo.TriangleCentroidCoord=optixGetTriangleBarycentrics();
+	SetPayLoad(hitInfo);
+}
+
+extern "C" __global__ void __miss__fetchMissInfo()
+{
+	HitInfo hitInfo;
+	hitInfo.PrimitiveID=0xFFFFFFFF;
+	hitInfo.SbtDataPtr=((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;
+	hitInfo.TriangleCentroidCoord=make_float2(0.0f);
+	SetPayLoad(hitInfo);
 }

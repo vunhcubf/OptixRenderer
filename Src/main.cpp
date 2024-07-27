@@ -7,7 +7,7 @@
 #include <GLDisplay.h>
 #include <atomic>
 #include "runtime_shader_compile.h"
-
+#include "random_host.h"
 #include <windows.h>
 #include "ComputeShader.h"
 inline std::string getExecutablePath() {
@@ -52,89 +52,20 @@ void main() {
 		string ProjectPath = getParentDir(getParentDir(getParentDir(getExecutablePath())));// 向前滚动两级别
 		string CompiledShaderPath = ProjectPath + "/CompiledShaders";
 		string ShaderPath = ProjectPath + "/Shaders";
-		// shader编译的问题
-		// 首先读取存储的配置文件
-		string ConfigPath = ProjectPath + "/Config.ini";
-		// 解析配置文件
-		bool ExistConfigFile = std::filesystem::exists(ConfigPath);
-		unordered_map<string, uint64> ShaderContentHashes;
-		if(ExistConfigFile){
-			std::ifstream config_file;
-			config_file.open(ConfigPath);
-			if (!config_file.is_open()) {
-				std::stringstream ss;
-				ss << "文件没有打开：" << ConfigPath;
-				throw std::exception(ss.str().c_str());
-			}
-			if (config_file.is_open()) {
-				string line;
-				while (std::getline(config_file, line)) {
-					vector<string> tokens = Split(line, ' ');
-					if (tokens.at(0) == "ShaderHash") {
-						uint64 hash = strtoull(tokens.at(2).c_str(), nullptr, 10);
-						ShaderContentHashes.insert({ tokens.at(1),hash });
-					}
-				}
-			}
-		}
-		vector<pair<string, string>> shader_headers;
-		vector<const char*> headers_cstr_array_names, headers_cstr_array_contents;
-		for (auto& inst : shader_headers) {
-			headers_cstr_array_names.push_back(inst.first.c_str());
-			headers_cstr_array_contents.push_back(inst.second.c_str());
-		}
+		string BlueNoiseMapPath=ProjectPath + "/Assets/Textures/stbn_vec3_2Dx1D_128x128x64_49.png";
+		// 加载蓝噪声图
+		BlueNoiseMapBufferManager BlueNoise(BlueNoiseMapPath.c_str());
+		// 所有文件都编译
 		ShaderCollection shader_sources = ReadShaderSources(ProjectPath);
 		// 先检测有哪些shader，对于存在的shader比较hash值，对于新的shader直接加入编译
-		unordered_set<string> ExistsPtx;
-		if (std::filesystem::exists(CompiledShaderPath) && std::filesystem::is_directory(CompiledShaderPath)) {
-			for (const auto& entry : std::filesystem::recursive_directory_iterator(CompiledShaderPath)) {
-				if (std::filesystem::is_regular_file(entry.status())) {
-					ExistsPtx.insert(Split(entry.path().filename().string(), '.').at(0));
-				}
-			}
-		}
-		else {
-			std::cout << "Directory does not exist or is not a directory." << std::endl;
-		}
-		unordered_set<string> ShadersToCompile;
-		for (auto& shaders : shader_sources) {
-			const string& shader_source_name_inst = shaders.first;
-			// 在现有的ptx中查找
-			string shader_source_name_inst_no_prefix = Split(shader_source_name_inst, '.').at(0);
-			std::hash<string> hasher;
-			uint64 HashNewShader = hasher(shader_sources[shader_source_name_inst]);
-			if (ExistsPtx.find(shader_source_name_inst_no_prefix) != ExistsPtx.end()) {
-				// 如果找到了就比较hash
-				if (!ExistConfigFile) {
-					ShadersToCompile.insert(shader_source_name_inst);
-				}
-				else {
-					// 计算hash值进行比较
-					// 是否对这个shader有记录
-					if (ShaderContentHashes.find(shader_source_name_inst) != ShaderContentHashes.end()) {
-						if (HashNewShader != ShaderContentHashes[shader_source_name_inst]) {
-							ShadersToCompile.insert(shader_source_name_inst);
-						}
-					}
-					else {
-						ShadersToCompile.insert(shader_source_name_inst);
-					}
-					ShaderContentHashes[shader_source_name_inst] = HashNewShader;
-				}
-			}
-			else {
-				ShadersToCompile.insert(shader_source_name_inst);
-				ShaderContentHashes[shader_source_name_inst] = HashNewShader;
-			}
-		}
 		// 开始编译
 		{
-			for (auto& shader_to_compile_inst : ShadersToCompile) {
-				std::cout << "正在编译着色器：" << shader_to_compile_inst << endl;
+			for (auto& shader_to_compile_inst : shader_sources) {
+				std::cout << "正在编译着色器：" << shader_to_compile_inst.first << endl;
 				nvrtcProgram prog;
 				nvrtcCreateProgram(&prog,             // 程序
-					shader_sources[shader_to_compile_inst].c_str(),    // 源码字符串
-					shader_to_compile_inst.c_str(),    // 内核名称
+					shader_to_compile_inst.second.c_str(),    // 源码字符串
+					shader_to_compile_inst.first.c_str(),    // 内核名称
 					0,
 					nullptr,
 					nullptr);    // 头文件和包括
@@ -165,10 +96,10 @@ void main() {
 				std::vector<char> ptx(ptxSize);
 				nvrtcGetPTX(prog, ptx.data());
 				// 写入PTX
-				std::ofstream file(CompiledShaderPath+"/"+ shader_to_compile_inst+".ptx");
+				std::ofstream file(CompiledShaderPath+"/"+ shader_to_compile_inst.first+".ptx");
 		
 				if (!file) {
-					std::cerr << "Error opening file for writing: " << shader_to_compile_inst<<".ptx" << std::endl;
+					std::cerr << "Error opening file for writing: " << shader_to_compile_inst.first<<".ptx" << std::endl;
 					return;
 				}
 		
@@ -177,16 +108,6 @@ void main() {
 				file.close();
 			}
 		}
-		// 更新记录文件
-		std::ofstream config_file(ConfigPath);
-		if (!config_file) {
-			std::cerr << "Error opening file for writing: " << ConfigPath << std::endl;
-			return;
-		}
-		for (auto& shader_hash_obj_inst : ShaderContentHashes) {
-			config_file <<"ShaderHash " << shader_hash_obj_inst.first << " " << shader_hash_obj_inst.second << "\n";
-		}
-		config_file.close();
 		MyTexture<float4> SkyBoxTex(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr");
 		MyTexture<float4> SkyBoxTex2(ProjectPath + "/Assets/Textures/citrus_orchard_road_2k.exr");
 		MyTexture<float4> SkyBoxTex3(ProjectPath + "/Assets/Textures/autumn_field_puresky_2k.exr");
@@ -214,14 +135,16 @@ void main() {
 		CUmodule AccumulateCs = LoadModule(AccumulateCsPath);
 		CUfunction AccumulateCs_Fn = LoadFunction(AccumulateCs, "AccumulateFrame");
 
-		scene.AddMissShader("__miss__sky", "module_basic");
-		scene.AddRayGenerationShader("__raygen__primary_ray", "module_basic");
+		scene.AddMissShader("__miss__fetchMissInfo", "module_disney_principled");
+		scene.AddRayGenerationShader("__raygen__principled_bsdf", "module_disney_principled");
 		scene.AddHitShader("CH_diffuse", "module_smallpt_styled", "__closesthit__diffuse", "", "");
 		scene.AddHitShader("CH_glossy", "module_smallpt_styled", "__closesthit__glossy", "", "");
 		scene.AddHitShader("CH_glass", "module_smallpt_styled", "__closesthit__glass", "", "");
 		scene.AddHitShader("CH_occluded", "module_smallpt_styled", "__closesthit__occluded", "", "");
 
 		scene.AddHitShader("CH_principled_bsdf", "module_disney_principled", "__closesthit__principled_bsdf", "", "");
+
+		scene.AddHitShader("CH_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
 
 		// 新的obj加载器
 		{
@@ -233,7 +156,7 @@ void main() {
 				ObjectDesc desc;
 				desc.mesh = mesh;
 				desc.mat = mat;
-				desc.shaders = { "CH_principled_bsdf","CH_occluded" };
+				desc.shaders = { "CH_fetchHitInfo","CH_fetchHitInfo" };
 				scene.AddObjects(desc, name);
 			}
 		}
@@ -246,7 +169,7 @@ void main() {
 				ObjectDesc desc;
 				desc.mesh = mesh;
 				desc.mat = mat;
-				desc.shaders = { "CH_principled_bsdf","CH_occluded" };
+				desc.shaders = { "CH_fetchHitInfo","CH_fetchHitInfo" };
 				scene.AddObjects(desc, name);
 			}
 		}
@@ -254,7 +177,7 @@ void main() {
 		ObjectDesc desc;
 		desc.mesh = MyMesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
 		desc.mat.MaterialType = MATERIAL_AREALIGHT;
-		desc.shaders = { "CH_principled_bsdf","CH_occluded" };
+		desc.shaders = { "CH_fetchHitInfo","CH_fetchHitInfo" };
 		scene.AddObjects(desc, name); }
 
 		scene.ConfigureMissSbt({ make_float3(0.5f,0.5f,0.5f),1.0f,SkyBoxTex.GetTextureId()});
@@ -400,6 +323,7 @@ void main() {
 		uint64 AddressBiasOfSeedInLaunchParams = (uint64)(&p->Seed) - (uint64)(p);
 		uint64 AddressBiasOfHeightInLaunchParams = (uint64)(&p->Height) - (uint64)(p);
 		uint64 AddressBiasOfWidthInLaunchParams = (uint64)(&p->Width) - (uint64)(p);
+		uint64 AddressBiasOfPixelOffsetInLaunchParams = (uint64)(&p->PixelOffset) - (uint64)(p);
 		uint64 AddressBiasOfIndirectOutputBufferInLaunchParams = (uint64)(&p->IndirectOutputBuffer) - (uint64)(p);
 		//创建渲染纹理用于帧结果累计
 		//希望渲染纹理不要频繁申请释放
@@ -409,6 +333,15 @@ void main() {
 		CUDA_CHECK(cudaMalloc(FrameBuffer2.GetAddressOfPtr(), sizeof(float3) * expected_max_width * expected_max_height));
 		CUDA_CHECK(cudaMalloc(FrameBuffer3.GetAddressOfPtr(), sizeof(float3) * expected_max_width * expected_max_height));
 		uint64 FrameNumber = 0;
+
+		// 初始化随机数器
+		uint64* RandomGeneratorPixelOffset;
+		{
+			uint PixelCount=prev_height*prev_width;
+			CUDA_CHECK(cudaMalloc(&RandomGeneratorPixelOffset,sizeof(uint64)*PixelCount));
+			CUDA_CHECK(cudaMemset(RandomGeneratorPixelOffset,0,sizeof(uint64)*PixelCount));
+		}
+
 		while (!glfwWindowShouldClose(window))
 		{
 			int width, height;
@@ -446,6 +379,15 @@ void main() {
 				BiasedAddress = (uint64)LParams.GetPtr() + AddressBiasOfCameraDataInLaunchParams;
 				CameraData data = camera.ExportCameraData(width, height);
 				CUDA_CHECK(cudaMemcpyAsync((void*)BiasedAddress, &data, sizeof(CameraData), cudaMemcpyHostToDevice, Stream));
+				// 重新设置像素累计数据
+				{		
+					uint64 BiasedAddress = (uint64)LParams.GetPtr() + AddressBiasOfPixelOffsetInLaunchParams;		
+					CUDA_CHECK(cudaFree(RandomGeneratorPixelOffset));
+					uint PixelCount=prev_height*prev_width;
+					CUDA_CHECK(cudaMalloc(&RandomGeneratorPixelOffset,sizeof(uint64)*PixelCount));
+					CUDA_CHECK(cudaMemset(RandomGeneratorPixelOffset,0,sizeof(uint64)*PixelCount));
+					CUDA_CHECK(cudaMemcpy((void*)BiasedAddress,&RandomGeneratorPixelOffset,sizeof(uint64*),cudaMemcpyHostToDevice));
+				}
 				//重新创建FrameBuffer2
 				//重新累计
 				FrameCounter = 0;
@@ -490,6 +432,8 @@ void main() {
 				params.Spp = 1;
 				params.MaxRecursionDepth = scene.GetMaxRecursionDepth();
 				params.IndirectOutputBuffer = (float3*)FrameBuffer2.GetPtr();
+				params.PixelOffset=RandomGeneratorPixelOffset;
+				params.BlueNoiseBuffer=BlueNoise.GetBuffer();
 				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &params, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
 			}
 
@@ -513,7 +457,7 @@ void main() {
 			CUDA_CHECK(cudaMemcpyAsync((void*)BiasedAddressOfParams, &seed, sizeof(uint), cudaMemcpyHostToDevice, Stream));
 			CUDA_CHECK(cudaMemcpyAsync((void*)((uint64)LParams.GetPtr() + AddressBiasOfFrameNumberInLaunchParams), &FrameNumber, sizeof(uint64), cudaMemcpyHostToDevice, Stream));
 			CUDA_CHECK(cudaGetLastError());
-			scene.DispatchRays(devPtr, Stream, (LaunchParameters*)LParams.GetPtr(), width, height, 1);
+			scene.DispatchRays(devPtr, Stream, (LaunchParameters*)LParams.GetPtr(), width, height);
 
 			//希望当相机不动时累计结果
 			{
@@ -568,7 +512,7 @@ void main() {
 			glfwSetWindowTitle(window, ss.str().c_str());
 			FrameNumber++;
 		}
-
+		CUDA_CHECK(cudaFree(RandomGeneratorPixelOffset));
 		// optional: de-allocate all resources once they've outlived their purpose:
 		// ------------------------------------------------------------------------
 		glDeleteVertexArrays(1, &VAO);

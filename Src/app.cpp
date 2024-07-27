@@ -37,9 +37,6 @@ void SceneManager::DestroyShaderManager()
 	if (ShaderRG) {
 		OPTIX_CHECK(optixProgramGroupDestroy(ShaderRG));
 	}
-	if (ShaderExcept) {
-		OPTIX_CHECK(optixProgramGroupDestroy(ShaderExcept));
-	}
 	if (ShaderMiss) {
 		OPTIX_CHECK(optixProgramGroupDestroy(ShaderMiss));
 	}
@@ -61,20 +58,6 @@ void SceneManager::ImportCompiledShader(string path, string ModuleName)
 
 void SceneManager::AddRayGenerationShader(string func_name, string module_name)
 {//创建跟签名前创建异常处理
-	ShaderExcept = nullptr;
-	OptixProgramGroupOptions GroupOpts = {};//不使用payloadtype
-	OptixProgramGroupDesc ExceptionGroupDesc = {};
-	ExceptionGroupDesc.kind = OPTIX_PROGRAM_GROUP_KIND_EXCEPTION;
-	ExceptionGroupDesc.exception.module = modules.at(module_name);
-	ExceptionGroupDesc.exception.entryFunctionName = "__exception__shader";
-	OPTIX_CHECK_LOG(optixProgramGroupCreate(
-		Context,
-		&ExceptionGroupDesc,
-		1,   // num program groups
-		&GroupOpts,
-		LOG, &LOG_SIZE,
-		&ShaderExcept
-	));
 	ShaderRG = CreateRayGenPg(Context, modules.at(module_name), func_name);
 	if (ShaderRG) {
 		cout << "导入光线发射函数 " << func_name << endl;
@@ -348,9 +331,9 @@ void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchPar
 	OPTIX_CHECK(optixLaunch(this->pipeLine, Stream, (CUdeviceptr)LaunchParameter.GetPtr(), sizeof(LaunchParameters), &Sbt, Width, Height, 1));
 	CUDA_CHECK(cudaStreamSynchronize(Stream));
 }
-void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height, uint Spp)
+void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height)
 {
-	OPTIX_CHECK(optixLaunch(this->pipeLine, Stream, (CUdeviceptr)LParams, sizeof(LaunchParameters), &Sbt, Width, Height, 1));
+	OPTIX_CHECK(optixLaunch(this->pipeLine, Stream, (CUdeviceptr)LParams, sizeof(LaunchParameters), &Sbt, Width, Height,1));
 	CUDA_CHECK(cudaStreamSynchronize(Stream));
 }
 //WASDEQ--

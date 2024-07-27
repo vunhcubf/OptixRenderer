@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include "Exception.h"
 #include <nvrtc.h>
 #include <vector_functions.h>
 #include <optix.h>
@@ -13,8 +14,14 @@
 #include <functional>
 #include <unordered_map>
 #include <sstream>
+#include <curand.h>
+#include <curand_kernel.h>
 #include <filesystem>
 #include <cstdlib>
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC 
+#include "stb/include/stb_image.h"
+#include <assert.h>
 typedef unsigned int uint;
 typedef unsigned long long uint64;
 typedef long long int64;
@@ -28,6 +35,7 @@ struct SbtRecord
     __align__(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
     T data;
 };
+#define CURAND_CHECK(x) assert(x==CURAND_STATUS_SUCCESS)
 #define M_PI 3.14159265358979f
 #define M_REVERSE_PI 0.318309886183791f
 struct HostMemStream {
@@ -55,20 +63,6 @@ struct CameraData {
 struct LaunchParametersDesc {
     CameraData cameraData;
     AreaLight areaLight;
-};
-
-struct LaunchParameters {
-    float3* IndirectOutputBuffer;
-    uchar4* ImagePtr;
-    uint Width;
-    uint Height;
-    CameraData cameraData;
-    OptixTraversableHandle Handle;
-    AreaLight areaLight;
-    uint Seed;
-    uint64 FrameNumber;
-    uint Spp;
-    uint MaxRecursionDepth;
 };
 
 struct GeometryBuffer {
@@ -131,7 +125,59 @@ inline void ResetMaterial(Material& mat) {
     mat.Opacity = 1.0f;
     mat.MaterialType = MaterialType::MATERIAL_OBJ;
 }
-
+struct BlueNoiseMapBuffer{
+    unsigned char* Data;
+    int width;
+    int height;
+    int channel;
+};
+struct BlueNoiseMapBufferManager{
+public:
+    unsigned char* hostdata;
+    unsigned char* devicedata;
+    BlueNoiseMapBuffer* devicebuffer;
+    int width;
+    int height;
+    int channel;
+public:
+    inline BlueNoiseMapBuffer* GetBuffer(){
+        return devicebuffer;
+    }
+    inline BlueNoiseMapBufferManager(const char* path){
+        this->hostdata = stbi_load(path, &this->width, &this->height, &this->channel, 0);
+        // 自动上传数据到gpu
+        CUDA_CHECK(cudaMalloc(&devicedata,sizeof(unsigned char)*width*height*channel));
+        CUDA_CHECK(cudaMemcpy(devicedata,hostdata,sizeof(unsigned char)*width*height*channel,cudaMemcpyHostToDevice));
+        BlueNoiseMapBuffer hostbuffer;
+        hostbuffer.width=this->width;
+        hostbuffer.height=this->height;
+        hostbuffer.channel=this->channel;
+        hostbuffer.Data=this->devicedata;
+        CUDA_CHECK(cudaMalloc(&devicebuffer,sizeof(BlueNoiseMapBuffer)));
+        CUDA_CHECK(cudaMemcpy(devicebuffer,&hostbuffer,sizeof(BlueNoiseMapBuffer),cudaMemcpyHostToDevice));
+    }
+    inline ~BlueNoiseMapBufferManager(){
+        CUDA_CHECK(cudaFree(devicebuffer));
+        CUDA_CHECK(cudaFree(devicedata));
+        stbi_image_free(hostdata);
+    }
+};
+struct LaunchParameters {
+    float3* IndirectOutputBuffer;
+    uchar4* ImagePtr;
+    uint Width;
+    uint Height;
+    CameraData cameraData;
+    OptixTraversableHandle Handle;
+    AreaLight areaLight;
+    uint Seed;
+    uint64 FrameNumber;
+    uint Spp;
+    uint MaxRecursionDepth;
+    // 随机数生成
+    uint64* PixelOffset;
+	BlueNoiseMapBuffer* BlueNoiseBuffer;
+};
 struct ModelData {
     GeometryBuffer* GeometryData;
     Material* MaterialData;

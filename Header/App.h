@@ -113,7 +113,6 @@ private:
 	Modules modules;
 	OptixProgramGroup ShaderRG=nullptr;
 	OptixProgramGroup ShaderMiss= nullptr;
-	OptixProgramGroup ShaderExcept= nullptr;
 public:
 	void DestroyShaderManager();
 	void DestroyModules();
@@ -143,7 +142,7 @@ private:
 	UniquePtrDevice LaunchParameter;
 public:
 	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParametersDesc LParamsDesc, uint Width, uint Height, uint Spp);
-	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height, uint Spp);
+	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height);
 };
 
 

@@ -1,3 +1,4 @@
+#pragma once
 #include "common.cuh"
 
 static __device__ __forceinline__ PerRayData FetchPerRayDataFromPayLoad() {
@@ -85,15 +86,15 @@ static __device__ __forceinline__ float2 GetTexCoord() {
 }
 static __forceinline__ __device__ void ComputeRay(uint3 idx, uint3 dim, float3& origin, float3& direction)
 {
-	const float3 U = params.cameraData.cam_u;
-	const float3 V = params.cameraData.cam_v;
-	const float3 W = params.cameraData.cam_w;
+	const float3 U = RayTracingGlobalParams.cameraData.cam_u;
+	const float3 V = RayTracingGlobalParams.cameraData.cam_v;
+	const float3 W = RayTracingGlobalParams.cameraData.cam_w;
 	const float2 d = 2.0f * make_float2(
 		static_cast<float>(idx.x) / static_cast<float>(dim.x),
 		static_cast<float>(idx.y) / static_cast<float>(dim.y)
 	) - 1.0f;
 
-	origin = params.cameraData.cam_eye;
+	origin = RayTracingGlobalParams.cameraData.cam_eye;
 	direction = normalize(d.x * U + d.y * V + W);
 }
 static __forceinline__ __device__ void ComputeRayWithJitter(uint3 idx, uint3 dim, float3& origin, float3& direction, float2 jitter)
@@ -101,12 +102,12 @@ static __forceinline__ __device__ void ComputeRayWithJitter(uint3 idx, uint3 dim
 	float2 screen_uv = make_float2(idx.x + jitter.x, idx.y + jitter.y);
 	screen_uv.x /= dim.x;
 	screen_uv.y /= dim.y;
-	const float3 U = params.cameraData.cam_u;
-	const float3 V = params.cameraData.cam_v;
-	const float3 W = params.cameraData.cam_w;
+	const float3 U = RayTracingGlobalParams.cameraData.cam_u;
+	const float3 V = RayTracingGlobalParams.cameraData.cam_v;
+	const float3 W = RayTracingGlobalParams.cameraData.cam_w;
 	const float2 d = 2.0f * screen_uv - 1.0f;
 
-	origin = params.cameraData.cam_eye;
+	origin = RayTracingGlobalParams.cameraData.cam_eye;
 	direction = normalize(d.x * U + d.y * V + W);
 }
 static __forceinline__ __device__ void optixTraceWithPerRayData(
@@ -127,7 +128,7 @@ static __forceinline__ __device__ void optixTraceWithPerRayData(
 	p6 = __float_as_uint(data.DebugData.x);
 	p7 = __float_as_uint(data.DebugData.y);
 	p8 = __float_as_uint(data.DebugData.z);
-	optixTrace(params.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
+	optixTrace(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
 		SBTOffset, SBTStride, MissSBTIndex,
 		p0, p1, p2, p3, p4, p5,p6,p7,p8);
 	//optixReorder();
@@ -160,7 +161,7 @@ static __forceinline__ __device__ void optixTraceWithPerRayDataReordered(
 	p6 = __float_as_uint(data.DebugData.x);
 	p7 = __float_as_uint(data.DebugData.y);
 	p8 = __float_as_uint(data.DebugData.z);
-	optixTraverse(params.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
+	optixTraverse(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
 		SBTOffset, SBTStride, MissSBTIndex,
 		p0, p1, p2, p3, p4, p5, p6, p7, p8);
 	optixReorder();
@@ -191,3 +192,4 @@ static __forceinline__ __device__ void optixTraceWithPerRayData(
 		SBTStride,
 		MissSBTIndex);
 }
+

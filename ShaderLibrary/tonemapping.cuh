@@ -1,3 +1,4 @@
+#pragma once
 #include "common.cuh"
 
 static __device__ float3 ACESFilm(float3 x)

@@ -8,7 +8,7 @@ extern "C" __global__ void __closesthit__diffuse()
 
 	PerRayData Data = FetchPerRayDataFromPayLoad();
 	if (GetModelDataPtr()->MaterialData->MaterialType == MATERIAL_AREALIGHT) {
-		Data.Radience = params.areaLight.Color;
+		Data.Radience = RayTracingGlobalParams.areaLight.Color;
 		Data.RayHitType = HIT_TYPE_LIGHT;
 		SetPerRayDataForPayLoad(Data);
 		return;
@@ -65,7 +65,7 @@ extern "C" __global__ void __closesthit__diffuse()
 
 	float pdf_diffuse = 0.0f;
 	bool IsBxdfRayHitLight=false;
-	if (Data.RecursionDepth < params.MaxRecursionDepth) {
+	if (Data.RecursionDepth < RayTracingGlobalParams.MaxRecursionDepth) {
 		float3 L;
 		pdf_diffuse = abs(dot(N, L)) * REVERSE_PI;
 		// 先为所有bxdf产生射线方向
@@ -86,12 +86,12 @@ extern "C" __global__ void __closesthit__diffuse()
 	float3 SamplePoint = RandomSamplePointOnLight(Data.Seed);
 	float3 ray_dir_direct = normalize(SamplePoint - RayOrigin);
 
-	float pdf_light = 1 / params.areaLight.Area;
+	float pdf_light = 1 / RayTracingGlobalParams.areaLight.Area;
 	if (dot(N_Geo, ray_dir_direct) > 1e-2f && ray_dir_direct.z > 1e-2f) {
 		PerRayData DataDirect;
 		optixTraceWithPerRayData(DataDirect, RayOrigin, ray_dir_direct, 1, 2, 0);
 
-		float Dw = params.areaLight.Area * saturate(dot(N, ray_dir_direct) + 1e-4f) * saturate(ray_dir_direct.z) / squared_length(RayOrigin - SamplePoint);
+		float Dw = RayTracingGlobalParams.areaLight.Area * saturate(dot(N, ray_dir_direct) + 1e-4f) * saturate(ray_dir_direct.z) / squared_length(RayOrigin - SamplePoint);
 		radience_direct = DataDirect.Radience * Dw * BaseColor * REVERSE_PI;
 	}
 	
@@ -110,7 +110,7 @@ extern "C" __global__ void __closesthit__glossy()
 {
 	PerRayData Data = FetchPerRayDataFromPayLoad();
 	if (GetModelDataPtr()->MaterialData->MaterialType == MATERIAL_AREALIGHT) {
-		Data.Radience = params.areaLight.Color;
+		Data.Radience = RayTracingGlobalParams.areaLight.Color;
 		Data.RayHitType = HIT_TYPE_LIGHT;
 		SetPerRayDataForPayLoad(Data);
 		return;
@@ -167,7 +167,7 @@ extern "C" __global__ void __closesthit__glossy()
 
 	float pdf_spec = 0.0f;
 	bool IsBxdfRayHitLight = false;
-	if (Data.RecursionDepth < params.MaxRecursionDepth) {
+	if (Data.RecursionDepth < RayTracingGlobalParams.MaxRecursionDepth) {
 		float3 L;
 		// 产生反射方向
 		float3 H = ImportanceSampleGGX(Data.Seed, nullptr, GetModelDataPtr()->MaterialData->Roughness);
@@ -207,7 +207,7 @@ extern "C" __global__ void __closesthit__glossy()
 	float3 SamplePoint = RandomSamplePointOnLight(Data.Seed);
 	float3 ray_dir_direct = normalize(SamplePoint - RayOrigin);
 
-	float pdf_light = 1 / params.areaLight.Area;
+	float pdf_light = 1 / RayTracingGlobalParams.areaLight.Area;
 	if (dot(N_Geo, ray_dir_direct) > 1e-2f && ray_dir_direct.z > 1e-2f) {
 		PerRayData DataDirect;
 		optixTraceWithPerRayData(DataDirect, RayOrigin, ray_dir_direct, 1, 2, 0);
@@ -223,7 +223,7 @@ extern "C" __global__ void __closesthit__glossy()
 		float Gs = Smith_G(N, H_d, V, ray_dir_direct, Roughness);
 		float3 brdf = Fs * Gs * Ds / abs(4 * dot(N, V) * dot(N, ray_dir_direct));
 
-		float Dw = params.areaLight.Area * saturate(dot(N, ray_dir_direct) + 1e-4f) * saturate(ray_dir_direct.z) / squared_length(RayOrigin - SamplePoint);
+		float Dw = RayTracingGlobalParams.areaLight.Area * saturate(dot(N, ray_dir_direct) + 1e-4f) * saturate(ray_dir_direct.z) / squared_length(RayOrigin - SamplePoint);
 		radience_direct = DataDirect.Radience * Dw * brdf;
 	}
 
@@ -243,13 +243,13 @@ extern "C" __global__ void __closesthit__glass()
 {
 	PerRayData Data = FetchPerRayDataFromPayLoad();
 	if (GetModelDataPtr()->MaterialData->MaterialType == MATERIAL_AREALIGHT) {
-		Data.Radience = params.areaLight.Color;
+		Data.Radience = RayTracingGlobalParams.areaLight.Color;
 		Data.RayHitType = HIT_TYPE_LIGHT;
 		SetPerRayDataForPayLoad(Data);
 		return;
 	}
 	// 使用轮盘赌决定是否停止
-	float roulette_ps = params.MaxRecursionDepth / (params.MaxRecursionDepth + 1.0f);
+	float roulette_ps = RayTracingGlobalParams.MaxRecursionDepth / (RayTracingGlobalParams.MaxRecursionDepth + 1.0f);
 	float rand_for_roulette = Rand(Data.Seed);
 	if (rand_for_roulette > roulette_ps) {
 		Data.Radience = make_float3(0);
@@ -319,7 +319,7 @@ extern "C" __global__ void __closesthit__glass()
 	float ps_tr = 0.0f;
 	bool IsBxdfRayHitLight = false;
 	float3 radience = make_float3(0);
-	if (Data.RecursionDepth < params.MaxRecursionDepth) {
+	if (Data.RecursionDepth < RayTracingGlobalParams.MaxRecursionDepth) {
 		float3 L;
 		// 产生反射方向
 		float3 H = ImportanceSampleGGX(Data.Seed, nullptr, GetModelDataPtr()->MaterialData->Roughness);
@@ -416,7 +416,7 @@ extern "C" __global__ void __closesthit__occluded() {
 	ModelData* modeldata_ptr = (ModelData*)HitGroupDataPtr->DataPtr;
 	PerRayData Data = FetchPerRayDataFromPayLoad();
 	if (modeldata_ptr->MaterialData->MaterialType == MATERIAL_AREALIGHT) {
-		Data.Radience = params.areaLight.Color;
+		Data.Radience = RayTracingGlobalParams.areaLight.Color;
 		Data.RayHitType = HIT_TYPE_LIGHT;
 	}
 	else {

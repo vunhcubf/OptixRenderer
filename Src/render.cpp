@@ -139,13 +139,13 @@ OptixPipelineCompileOptions CreatePipelineCompileOptions(uint TraversableGraphFl
 	PipelineCompileOpts.usesMotionBlur = false;
 	//直接遍历GAS，或者允许套娃一层IAS的GAS
 	PipelineCompileOpts.traversableGraphFlags = TraversableGraphFlags;
-	PipelineCompileOpts.numPayloadValues = NumPayloadValue;//payload占用3个32位寄存器
+	PipelineCompileOpts.numPayloadValues = NumPayloadValue;
 	PipelineCompileOpts.numAttributeValues = NumAttributeValues;//相交时的属性数
 	//检测所有的异常
 #if defined _DEBUG
 	PipelineCompileOpts.exceptionFlags = OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW | OPTIX_EXCEPTION_FLAG_TRACE_DEPTH | OPTIX_EXCEPTION_FLAG_USER;
 #endif
-	PipelineCompileOpts.pipelineLaunchParamsVariableName = "params";//启动参数的名字，通常是输出的图片
+	PipelineCompileOpts.pipelineLaunchParamsVariableName = "RayTracingGlobalParams";//启动参数的名字，通常是输出的图片
 	return PipelineCompileOpts;
 }
 
