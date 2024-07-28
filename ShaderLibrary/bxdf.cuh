@@ -106,3 +106,142 @@ static __device__ void DisneyBrdf(float3* Out_Spec, float3* Out_diff, float3* Su
 		Sum[0] = SpecularTerm + (1.0f - Metallic)*DiffuseTerm;
 	}
 }
+
+__device__ void PrincipledBsdf(uint RecursionDepth,SurfaceData surfaceData,float3 RayDirection,float3& RayDirectionNext,float3& BxdfWeight){
+	// 原理话bsdf包含brdf和btdf
+	uint3 Id=optixGetLaunchIndex();
+	float QsGlass=(1-surfaceData.Metallic)*surfaceData.Transmission;
+	float QsDielectric=1-QsGlass;
+	float NoiseSeq[9];
+	float3 Noise3=hash33(make_uint3(Id.x,Id.y,
+		RayTracingGlobalParams.FrameNumber*RayTracingGlobalParams.MaxRecursionDepth+RecursionDepth),
+		1103515245U);
+	NoiseSeq[0]=Noise3.x;
+	NoiseSeq[1]=Noise3.y;
+	NoiseSeq[2]=Noise3.z;
+	Noise3=hash33(make_uint3(Id.x,Id.y,
+		RayTracingGlobalParams.FrameNumber*RayTracingGlobalParams.MaxRecursionDepth+RecursionDepth),
+		134775813U);
+	NoiseSeq[3]=Noise3.x;
+	NoiseSeq[4]=Noise3.y;
+	NoiseSeq[5]=Noise3.z;
+
+	float3 V=normalize(-RayDirection);
+	bool InSurface=dot(surfaceData.Normal,V)>=0.0f;
+	float EtaI=InSurface ? 1:surfaceData.ior;
+	float EtaO=InSurface ? surfaceData.ior:1;
+	// 与射线方向同向的法线
+	float3 NForward=InSurface ? surfaceData.Normal : -surfaceData.Normal;
+	float PsReflect=0.0f;
+	float PsTransmission=0.0f;
+	float Pdf;
+	float3 Weight;
+	if(NoiseSeq[0]<QsGlass){
+		// 使用玻璃材质
+		float3 H = ImportanceSampleGGX(make_float2(NoiseSeq[2],NoiseSeq[3]), nullptr, surfaceData.Roughness);
+		float3 T, B;
+		{
+			GetTBNFromN(surfaceData.Normal, T, B);
+			H = T * H.x + B * H.y + surfaceData.Normal * H.z;
+			H = normalize(H);
+		}
+		float3 HForward = InSurface ? H : -H;
+
+		// 计算菲涅尔
+		float fs;
+		{
+			float c = abs(dot(V, HForward));
+			float g = pow2(EtaO / EtaI) - 1.0f + c * c;
+			if (g < 0.0f) {
+				// 全反射
+				fs = 1.0f;
+			}
+			else {
+				g = sqrt(g);
+				fs = 0.5f * pow2((g - c) / (g + c)) * (1 + pow2((c * (g + c) - 1) / (c * (g - c) + 1)));
+			}
+			fs = saturate(fs);
+		}
+		float QsReflect=lerp(0.1,0.9,fs);
+		float QsTransmission=1-QsReflect;
+		float3 L;
+		if(NoiseSeq[1]<QsTransmission){
+			// 折射
+			L = refract(-V, HForward, EtaI / EtaO, nullptr);
+		}
+		else{
+			// 反射
+			L = normalize(2 * dot(HForward, V) * HForward - V);
+		}
+		float PdfM = DistributionGGX(abs(dot(HForward, NForward)), surfaceData.Roughness) * abs(dot(HForward, NForward));
+		float JacobReflect = 1.0f / (4 * abs(dot(HForward, L)));
+		float PdfReflect = PdfM * JacobReflect;
+		float JacobTransmission = EtaO * EtaO * abs(dot(L, HForward)) / pow2(EtaI * dot(V, HForward) + EtaO * dot(L, HForward));
+		float PdfTransmission = PdfM * JacobTransmission;
+
+		float Ds = DistributionGGX(HForward, NForward, surfaceData.Roughness);
+		//遮蔽项
+		float Gs = Smith_G(NForward, HForward, V, L, surfaceData.Roughness);
+		float3 Brdf = surfaceData.BaseColor * fs * Gs * Ds / abs(4 * dot(NForward, V) * dot(NForward, L));
+
+		float3 numerator = sqrt(surfaceData.BaseColor) * (1 - fs) * Ds * Gs * abs(dot(HForward, L) * dot(HForward, V)) * EtaO * EtaO;
+		float denominator = abs(dot(NForward, V) * dot(NForward, L)) * pow2(EtaI * dot(V, HForward) + EtaO * dot(L, HForward));
+		float3 Btdf = numerator / denominator;
+
+		if(NoiseSeq[1]<QsTransmission){
+			// 折射
+			Weight=saturate(-dot(NForward, L)) * Btdf / (PdfTransmission * QsTransmission);
+		}
+		else{
+			// 反射
+			Weight=saturate(dot(NForward, L)) * Brdf / (PdfReflect * QsReflect);
+		}
+		RayDirectionNext=L;
+	}
+	else{
+		// 不透明材质
+		float QsDiffuse=1-surfaceData.Metallic;
+		float QsReflect=1;
+		float QsSum=QsDiffuse+QsReflect;
+		QsDiffuse/=QsSum;
+		QsReflect/=QsSum;
+		// 根据概率选择漫射或反射
+		float3 L;
+		if(NoiseSeq[1]<QsDiffuse){
+			L=ImportanceSampleCosWeight(make_float2(NoiseSeq[2],NoiseSeq[3]),NForward);
+		}
+		else{
+			float3 H = ImportanceSampleGGX(make_float2(NoiseSeq[4],NoiseSeq[5]), nullptr, surfaceData.Roughness);
+			float3 T, B;
+			{
+				GetTBNFromN(surfaceData.Normal, T, B);
+				H = T * H.x + B * H.y + surfaceData.Normal * H.z;
+				H = normalize(H);
+			}
+			float3 HForward = InSurface ? H : -H;
+			L = normalize(2 * dot(HForward, V) * HForward - V);
+		}
+		float3 HForward=normalize(V+L);
+
+		float PdfDiffuse=saturate(dot(NForward,L))*REVERSE_PI;
+		float PdfM=DistributionGGX(saturate(dot(NForward, HForward)), surfaceData.Roughness) * abs(dot(NForward, HForward));
+		float JacobReflect=1/(4*abs(dot(HForward,L)));
+		float PdfReflect=PdfM*JacobReflect;
+
+		float HdotV=abs(dot(V,HForward));
+		float3 Ctint = normalize(surfaceData.BaseColor);
+		float3 Cs = lerp(0.08 * surfaceData.Specular * lerp(make_float3(1), Ctint, surfaceData.SpecularTint), surfaceData.BaseColor, surfaceData.Metallic);
+		float3 Fs = Cs + (1 - Cs) * Pow5(1 - HdotV);
+		//法线分布函数
+		float Ds = DistributionGGX(saturate(dot(NForward, HForward)), surfaceData.Roughness);
+		//遮蔽项
+		float Gs = Smith_G(NForward, HForward, V, L, surfaceData.Roughness);
+		float3 BrdfSpecular = Fs * Gs * Ds / abs(4 * dot(NForward, V) * dot(NForward, L));
+		float3 BrdfDiffuse = surfaceData.BaseColor * REVERSE_PI;
+		float3 Brdf = (1 - surfaceData.Metallic) * BrdfDiffuse + BrdfSpecular;
+		Pdf=PdfReflect*QsReflect+PdfDiffuse*QsDiffuse;
+		Weight=saturate(dot(NForward,L))*Brdf/Pdf;
+		RayDirectionNext=L;
+	}
+	BxdfWeight=Weight;
+}

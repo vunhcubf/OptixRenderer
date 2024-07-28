@@ -103,6 +103,7 @@ inline unordered_map<string, Material> LoadMtl(string path) {
 				Temp.Roughness = std::atof(tokens.at(1).c_str());
 			}
 		}
+		Temp.MaterialType=MaterialType::MATERIAL_OBJ;
 		materials.push_back(Temp);
 	}
 	for (uint i = 0; i < names.size(); i++) {

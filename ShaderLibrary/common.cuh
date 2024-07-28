@@ -9,12 +9,82 @@
 #include <cuda/helpers.h>
 #include "optix_device.h"
 /// @brief ///////////////////
+const float goldenRatioConjugate = 0.061803398875f;
 typedef unsigned int uint;
 typedef unsigned long long uint64;
 typedef long long int64;
 typedef float float32;
 typedef double float64;
+enum SurfaceType : uint{
+	Light,
+	Opaque,
+	Miss
+};
+__device__ __forceinline__ uint3 operator>>(uint3 x,uint i){
+	return make_uint3(x.x>>i,x.y>>i,x.z>>i);
+}
+__device__ __forceinline__ uint3 operator^(uint3 a,uint3 b){
+	return make_uint3(a.x^b.x,a.y^b.y,a.z^b.z);
+}
+__device__ __forceinline__ uint4 operator>>(uint4 x,uint i){
+	return make_uint4(x.x>>i,x.y>>i,x.z>>i,x.w>>i);
+}
+__device__ __forceinline__ uint4 operator^(uint4 a,uint4 b){
+	return make_uint4(a.x^b.x,a.y^b.y,a.z^b.z,a.w^b.w);
+}
+__device__ __forceinline__ uint4 hash44i(uint4 x){
+    x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.w,x.x)) * 0x45d9f3bu;
+    x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.w,x.x)) * 0x45d9f3bu;
+    x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.w,x.x)) * 0x45d9f3bu;
+    x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.w,x.x)) * 0x45d9f3bu;
+    return x;
+}
+__device__ __forceinline__ uint4 hash34i(uint3 x0){
+    uint4 x = make_uint4(x0.x,x0.y,x0.z,x0.z);
+    x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.x,x.y)) * 0x45d9f3bu;
+    x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.x,x.z)) * 0x45d9f3bu;
+    x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.x,x.x)) * 0x45d9f3bu;
+    //x = (x >> 16u) ^ x;
+    return x;
+}
+__device__ __forceinline__ float4 hash44(uint4 p){
+    const float scale = pow(2., -32.);
+    uint4 h = hash44i(p);
+    return make_float4(h)*scale;
+}
 
+__device__ __forceinline__ float4 hash34(uint3 p){
+    const float scale = 1.0/float(0xffffffffU);
+    uint4 h = hash34i(uint3(p));
+    return make_float4(h)*scale;
+}
+__device__ __forceinline__ float3 hash33( uint3 x )
+{
+	const uint k = 1103515245U;
+    x = ((x>>8U)^make_uint3(x.y,x.z,x.x))*k;
+    x = ((x>>8U)^make_uint3(x.y,x.z,x.x))*k;
+    x = ((x>>8U)^make_uint3(x.y,x.z,x.x))*k;
+    
+    return make_float3(x)*(1.0/float(0xffffffffU));
+}
+__device__ __forceinline__ float3 hash33( uint3 x,uint seed )
+{
+	const uint& k = seed;
+    x = ((x>>8U)^make_uint3(x.y,x.z,x.x))*k;
+    x = ((x>>8U)^make_uint3(x.y,x.z,x.x))*k;
+    x = ((x>>8U)^make_uint3(x.y,x.z,x.x))*k;
+    
+    return make_float3(x)*(1.0/float(0xffffffffU));
+}
+__device__ __forceinline__ float frac(float x){
+	return x-(int)x;
+}
+__device__ __forceinline__ float4 frac(float4 a){
+	return make_float4(frac(a.x),
+	frac(a.y),
+	frac(a.z),
+	frac(a.w));
+}
 #define NO_TEXTURE_HERE 0xFFFFFFFF
 template <typename T>
 struct SbtRecord
@@ -66,6 +136,7 @@ struct HitInfo{ // 5 uint
 	CUdeviceptr SbtDataPtr;// 2 uint
 	uint PrimitiveID; // 1 uint
 	float2 TriangleCentroidCoord; // 2 uint
+	SurfaceType surfaceType;
  };
 struct RayGenData
 {
@@ -198,7 +269,7 @@ __device__ inline uint2 BlueNoiseMapBuffer::GetLoopSamplePixelId(){
 	res.x=res.x%width;
 	return res;
 }
-#define SAMPLE_BLUENOISE_4D(x) RayTracingGlobalParams.BlueNoiseBuffer->Sample<4>(RayTracingGlobalParams.BlueNoiseBuffer->GetLoopSamplePixelId(),&x)
+#define SAMPLE_BLUENOISE_4D(x) RayTracingGlobalParams.BlueNoiseBuffer->Sample<4>(make_uint2(optixGetLaunchIndex().x,optixGetLaunchIndex().y),&x)
 template<typename T>
 static __forceinline__ __device__ T SampleTexture2D(cudaTextureObject_t tex, float u, float v) {
 	return tex2D<T>(tex, u, v);
@@ -404,6 +475,31 @@ static __device__ float3 ImportanceSampleGGX(uint& Seed, float* Pdf, float rough
 	
 	return H;
 }
+static __device__ float3 ImportanceSampleGGX(float2 rnd, float* Pdf, float roughness)
+{
+	float a = roughness * roughness;
+	float2& Xi=rnd;
+	float phi = 2.0 * PI * Xi.x;
+	float up = (1.0 - Xi.y) * 1000;
+	float down = (1.0 + (a * a - 1.0) * Xi.y) * 1000;
+	float cosTheta = sqrt(up / down);
+	float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+	// from spherical coordinates to cartesian coordinates
+	float3 H;
+	H.x = cos(phi) * sinTheta;
+	H.y = sin(phi) * sinTheta;
+	H.z = cosTheta;
+
+	// ¼ÆËãpdf_h : D * cos
+	if (Pdf) {
+		float d = (cosTheta * a - cosTheta) * cosTheta + 1;
+		float D = a / (PI * d * d);
+		Pdf[0] = D * cosTheta;
+	}
+	
+	return H;
+}
 static __forceinline__ __device__ void GetTBNFromN(float3 N,float3& T,float3& B) {
 	if (N.x == 0 && N.z == 0) {
 		T = make_float3(0, N.z, -N.y);//x
@@ -477,20 +573,40 @@ static __device__ float RndUniform(){
 }
 
 struct SurfaceData{
+	float3 Normal;
+	float3 GeometryNormal;
+	float3 Position;
 	float3 BaseColor;
-	float Roughness;
 	float3 NormalMap;
+	float2 TexCoord;
+	float Roughness;
 	float Metallic;
 	float Specular;
 	float SpecularTint;
 	float AO=1.0f;
-	float3 Normal;
-	float3 GeometryNormal;
-	float2 TexCoord;
-	float3 Position;
 	float Transmission;
 	float ior;
+	SurfaceType HitType;
+	__device__ void Clear(){
+		Normal=make_float3(0.0f);
+		GeometryNormal=make_float3(0.0f);
+		Position=make_float3(0.0f);
+		BaseColor=make_float3(0.0f);
+		NormalMap=make_float3(0.0f);
+		TexCoord=make_float2(0.0f);
+		Roughness=0.0f;
+		Metallic=0.0f;
+		Specular=0.0f;
+		SpecularTint=0.0f;
+		AO=1.0f;
+		Transmission=0.0f;
+		ior=0.0f;
+	}
 	__device__ void Load(HitInfo& hitInfo){
+		HitType=hitInfo.surfaceType;
+		if(HitType!=SurfaceType::Opaque){
+			return;
+		}
 		if(hitInfo.PrimitiveID==0xFFFFFFFF){return;}
 		ModelData* ModelDataptr = (ModelData*)(hitInfo.SbtDataPtr);
 		Specular = ModelDataptr->MaterialData->Specular;
