@@ -67,11 +67,11 @@ extern "C" __global__ void __closesthit__diffuse()
 	bool IsBxdfRayHitLight=false;
 	if (Data.RecursionDepth < RayTracingGlobalParams.MaxRecursionDepth) {
 		float3 L;
-		pdf_diffuse = abs(dot(N, L)) * REVERSE_PI;
+		
 		// 先为所有bxdf产生射线方向
 
 		L = ImportanceSampleCosWeight(Data.Seed, N);
-
+		pdf_diffuse = abs(dot(N, L)) * REVERSE_PI;
 		PerRayData DataBxdf;
 		DataBxdf.Radience = make_float3(0);
 		DataBxdf.RecursionDepth = Data.RecursionDepth;

@@ -22,7 +22,7 @@ void context_log_cb(unsigned int level, const char* tag, const char* message, vo
 
 OptixTraversableHandle CreateGAS(
 	OptixDeviceContext& Context,
-	MyMesh& mesh,
+	Mesh& mesh,
 	uint SbtNumRecord,
 	std::vector<CUdeviceptr>& GpuBufferToRelease);
 
@@ -103,9 +103,9 @@ CUdeviceptr CreateSbtRecord(OptixProgramGroup& ProgramGroup, T Data) {
 	return (CUdeviceptr)RecordDevice;
 }
 
-ModelData* AssembleModelData(Material mat, MyMesh& mesh, std::vector<CUdeviceptr>& GpuBuffersToRelease);
+ModelData* AssembleModelData(Material mat, Mesh& mesh, std::vector<CUdeviceptr>& GpuBuffersToRelease);
 
 void ReleaseGpuResources(std::vector<CUdeviceptr>& GpuBufferToRelease);
 CUdeviceptr UploadAnything(HostMemStream mem, std::vector<CUdeviceptr>& GpuBufferToRelease);
 void* UploadAnything(void* ptr,size_t size);
-GeometryBuffer* CreateAndUploadGeometryBuffer(MyMesh& mesh, std::vector<CUdeviceptr>& GpuBuffersToRelease);
+GeometryBuffer* CreateAndUploadGeometryBuffer(Mesh& mesh, std::vector<CUdeviceptr>& GpuBuffersToRelease);

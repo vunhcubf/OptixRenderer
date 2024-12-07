@@ -7,7 +7,7 @@ void context_log_cb(unsigned int level, const char* tag, const char* message, vo
 	std::cerr << "[" << std::setw(2) << level << "][" << std::setw(12) << tag << "]: "
 		<< message << "\n";
 }
-OptixTraversableHandle CreateGAS(OptixDeviceContext& Context, MyMesh& mesh, uint SbtNumRecord, std::vector<CUdeviceptr>& GpuBufferToRelease)
+OptixTraversableHandle CreateGAS(OptixDeviceContext& Context, Mesh& mesh, uint SbtNumRecord, std::vector<CUdeviceptr>& GpuBufferToRelease)
 {
 	OptixTraversableHandle Handle;
 	CUdeviceptr GASOutputBuffer;
@@ -289,7 +289,7 @@ OptixPipeline CreatePipeline(OptixDeviceContext& Context, OptixPipelineCompileOp
 }
 
 
-ModelData* AssembleModelData(Material mat, MyMesh& mesh, std::vector<CUdeviceptr>& GpuBuffersToRelease) {
+ModelData* AssembleModelData(Material mat, Mesh& mesh, std::vector<CUdeviceptr>& GpuBuffersToRelease) {
 	Material* mat_device = (Material*)UploadAnything({ &mat ,sizeof(Material) }, GpuBuffersToRelease);
 	GeometryBuffer* geometry_buffer_device = CreateAndUploadGeometryBuffer(mesh, GpuBuffersToRelease);
 	ModelData model_data = { geometry_buffer_device,mat_device };
@@ -329,7 +329,7 @@ void* UploadAnything(void* ptr, size_t size)
 	return Ptr;
 }
 
-GeometryBuffer* CreateAndUploadGeometryBuffer(MyMesh& mesh, std::vector<CUdeviceptr>& GpuBuffersToRelease)
+GeometryBuffer* CreateAndUploadGeometryBuffer(Mesh& mesh, std::vector<CUdeviceptr>& GpuBuffersToRelease)
 {
 	//ÉêÇëÈý¿écpuÄÚ´æ
 	GeometryBuffer BufferHost;

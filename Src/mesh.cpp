@@ -1,6 +1,6 @@
 #include "mesh.h"
 
-MyMesh MyMesh::LoadMeshFromFile(std::string path)
+Mesh Mesh::LoadMeshFromFile(std::string path)
 {
 	std::vector<float3> vertices_temp;
 	std::vector<float3> normal_temp;
@@ -104,7 +104,7 @@ MyMesh MyMesh::LoadMeshFromFile(std::string path)
 		}
 	}
 	ifs.close();
-	MyMesh output;
+	Mesh output;
 	output.Indices = indicesbuffer;
 	output.Normals = normal;
 	output.Vertices = vertices;
@@ -117,7 +117,7 @@ MyMesh MyMesh::LoadMeshFromFile(std::string path)
 	return output;
 }
 
-MyMesh::~MyMesh()
+Mesh::~Mesh()
 {
 	Vertices.clear();
 	Vertices.shrink_to_fit();
@@ -129,32 +129,32 @@ MyMesh::~MyMesh()
 	Indices.shrink_to_fit();
 }
 
-size_t MyMesh::GetVerticesCount()
+size_t Mesh::GetVerticesCount()
 {
 	return Vertices.size();
 }
 
-size_t MyMesh::GetIndicesCount()
+size_t Mesh::GetIndicesCount()
 {
 	return Indices.size();
 }
 
-void* MyMesh::GetVerticesPtr()
+void* Mesh::GetVerticesPtr()
 {
 	return Vertices.data();
 }
 
-void* MyMesh::GetNormalsPtr()
+void* Mesh::GetNormalsPtr()
 {
 	return Normals.data();
 }
 
-void* MyMesh::GetUVsPtr()
+void* Mesh::GetUVsPtr()
 {
 	return Uvs.data();
 }
 
-void* MyMesh::GetIndicesPtr()
+void* Mesh::GetIndicesPtr()
 {
 	return Indices.data();
 }

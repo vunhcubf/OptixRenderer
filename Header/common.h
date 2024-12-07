@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <vector_types.h>
+#include <tuple>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -27,6 +28,9 @@ typedef unsigned long long uint64;
 typedef long long int64;
 typedef float float32;
 typedef double float64;
+
+// 前向声明
+struct TextureView;
 
 #define NO_TEXTURE_HERE 0xFFFFFFFF
 template <typename T>
@@ -177,6 +181,7 @@ struct LaunchParameters {
     // 随机数生成
     uint64* PixelOffset;
 	BlueNoiseMapBuffer* BlueNoiseBuffer;
+	TextureView* textureDiscriptorsRange;
 };
 struct ModelData {
     GeometryBuffer* GeometryData;

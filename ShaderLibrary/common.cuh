@@ -9,12 +9,27 @@
 #include <cuda/helpers.h>
 #include "optix_device.h"
 /// @brief ///////////////////
-const float goldenRatioConjugate = 0.061803398875f;
+#define TEXTURE_FORMAT_UCHAR1 0
+#define TEXTURE_FORMAT_UCHAR2 1
+#define TEXTURE_FORMAT_UCHAR3 2
+#define TEXTURE_FORMAT_UCHAR4 3
+#define TEXTURE_FORMAT_FLOAT1 4
+#define TEXTURE_FORMAT_FLOAT2 5
+#define TEXTURE_FORMAT_FLOAT3 6
+#define TEXTURE_FORMAT_FLOAT4 7
+
 typedef unsigned int uint;
 typedef unsigned long long uint64;
 typedef long long int64;
 typedef float float32;
 typedef double float64;
+struct TextureView{
+	uint width;
+	uint height;
+	unsigned char textureFormat;
+	cudaTextureObject_t textureIdentifier;
+};
+const float goldenRatioConjugate = 0.061803398875f;
 enum SurfaceType : uint{
 	Light,
 	Opaque,
@@ -141,12 +156,13 @@ struct HitInfo{ // 5 uint
 struct RayGenData
 {
     float r, g, b;
-    cudaTextureObject_t TestTex;
+    uint64 TestTex;
 };
 struct MissData {
     float3 BackgroundColor;
     float SkyBoxIntensity;
-    cudaTextureObject_t SkyBox;
+    //uint64 skyBoxTextureIdentifier;
+	cudaTextureObject_t SkyBox;
 };
 struct BlueNoiseMapBuffer{
     unsigned char* Data;
@@ -210,14 +226,15 @@ struct LaunchParameters {
     // 随机数生成
     uint64* PixelOffset;
 	BlueNoiseMapBuffer* BlueNoiseBuffer;
+	TextureView* textureDiscriptorsRange;
 };
 
 //原理化BSDF
 struct Material
 {
-    cudaTextureObject_t NormalMap=NO_TEXTURE_HERE;
-    cudaTextureObject_t BaseColorMap= NO_TEXTURE_HERE;
-    cudaTextureObject_t ARMMap= NO_TEXTURE_HERE;
+    uint64 NormalMap=NO_TEXTURE_HERE;
+    uint64 BaseColorMap= NO_TEXTURE_HERE;
+    uint64 ARMMap= NO_TEXTURE_HERE;
     float3 BaseColor = make_float3(0.8,0.8,0.8);
     float3 Emission = make_float3(0, 0, 0);
     float Roughness=0.5f;
@@ -271,11 +288,11 @@ __device__ inline uint2 BlueNoiseMapBuffer::GetLoopSamplePixelId(){
 }
 #define SAMPLE_BLUENOISE_4D(x) RayTracingGlobalParams.BlueNoiseBuffer->Sample<4>(make_uint2(optixGetLaunchIndex().x,optixGetLaunchIndex().y),&x)
 template<typename T>
-static __forceinline__ __device__ T SampleTexture2D(cudaTextureObject_t tex, float u, float v) {
+static __forceinline__ __device__ T SampleTexture2D(uint64 tex, float u, float v) {
 	return tex2D<T>(tex, u, v);
 }
 template<typename T>
-static __forceinline__ __device__ float3 SampleTexture2DColor(cudaTextureObject_t tex, float u, float v) {
+static __forceinline__ __device__ float3 SampleTexture2DColor(uint64 tex, float u, float v) {
 	float4 tmp= tex2D<T>(tex, u, v);
 	float3 color = make_float3(tmp.x, tmp.y, tmp.z);
 	return color;

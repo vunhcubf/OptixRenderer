@@ -107,7 +107,7 @@ static __device__ void DisneyBrdf(float3* Out_Spec, float3* Out_diff, float3* Su
 	}
 }
 
-__device__ void PrincipledBsdf(uint RecursionDepth,SurfaceData surfaceData,float3 RayDirection,float3& RayDirectionNext,float3& BxdfWeight){
+__device__ void PrincipledBsdf(uint RecursionDepth,SurfaceData surfaceData,float3& RayDirection,float3& BxdfWeight,bool TraceGlass){
 	// 原理话bsdf包含brdf和btdf
 	uint3 Id=optixGetLaunchIndex();
 	float QsGlass=(1-surfaceData.Metallic)*surfaceData.Transmission;
@@ -132,10 +132,9 @@ __device__ void PrincipledBsdf(uint RecursionDepth,SurfaceData surfaceData,float
 	float EtaO=InSurface ? surfaceData.ior:1;
 	// 与射线方向同向的法线
 	float3 NForward=InSurface ? surfaceData.Normal : -surfaceData.Normal;
-	float PsReflect=0.0f;
-	float PsTransmission=0.0f;
 	float Pdf;
 	float3 Weight;
+	TraceGlass=NoiseSeq[0]<QsGlass;
 	if(NoiseSeq[0]<QsGlass){
 		// 使用玻璃材质
 		float3 H = ImportanceSampleGGX(make_float2(NoiseSeq[2],NoiseSeq[3]), nullptr, surfaceData.Roughness);
@@ -196,15 +195,12 @@ __device__ void PrincipledBsdf(uint RecursionDepth,SurfaceData surfaceData,float
 			// 反射
 			Weight=saturate(dot(NForward, L)) * Brdf / (PdfReflect * QsReflect);
 		}
-		RayDirectionNext=L;
+		RayDirection=L;
 	}
 	else{
 		// 不透明材质
-		float QsDiffuse=1-surfaceData.Metallic;
-		float QsReflect=1;
-		float QsSum=QsDiffuse+QsReflect;
-		QsDiffuse/=QsSum;
-		QsReflect/=QsSum;
+		float QsDiffuse=lerp(0.5f,0.0f,surfaceData.Metallic);
+		float QsReflect=1-QsDiffuse;
 		// 根据概率选择漫射或反射
 		float3 L;
 		if(NoiseSeq[1]<QsDiffuse){
@@ -241,7 +237,7 @@ __device__ void PrincipledBsdf(uint RecursionDepth,SurfaceData surfaceData,float
 		float3 Brdf = (1 - surfaceData.Metallic) * BrdfDiffuse + BrdfSpecular;
 		Pdf=PdfReflect*QsReflect+PdfDiffuse*QsDiffuse;
 		Weight=saturate(dot(NForward,L))*Brdf/Pdf;
-		RayDirectionNext=L;
+		RayDirection=L;
 	}
 	BxdfWeight=Weight;
 }

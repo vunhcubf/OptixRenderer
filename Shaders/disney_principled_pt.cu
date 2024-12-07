@@ -323,7 +323,15 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 	HitInfo hitInfo;
 	TraceRay(hitInfo,RayOrigin, RayDirection,1e-3f, 0, 2, 0);
 	if(hitInfo.surfaceType==Miss){
-		RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = make_float3(0.5f);
+		MissData* data = (MissData*)hitInfo.SbtDataPtr;
+		float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
+		if (data->SkyBox != NO_TEXTURE_HERE) {
+			float4 skybox = SampleTexture2D<float4>(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
+			RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = make_float3(skybox.x, skybox.y, skybox.z);
+		}
+		else {
+			RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = data->BackgroundColor * data->SkyBoxIntensity;
+		}
 		return;
 	}
 	else if(hitInfo.surfaceType==Light){
@@ -334,7 +342,15 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		// 这次的着色点由上一次追踪给出
 		// 判断是否miss
 		if(hitInfo.surfaceType==Miss){
-			Radience+=Weight*make_float3(0.5f);
+			MissData* data = (MissData*)hitInfo.SbtDataPtr;
+			float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
+			if (data->SkyBox != NO_TEXTURE_HERE) {
+				float4 skybox = SampleTexture2D<float4>(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
+				Radience+=Weight*make_float3(skybox.x, skybox.y, skybox.z);
+			}
+			else {
+				Radience+=Weight*data->BackgroundColor * data->SkyBoxIntensity;
+			}
 			break;
 		}
 		else if(hitInfo.surfaceType==Light){
@@ -347,34 +363,38 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		surfaceData.Load(hitInfo);
 		
 		// 假设只考虑漫射
+		bool TraceGlass;
 		float4 Noise4=hash44(make_uint4(idx.x,idx.y,RayTracingGlobalParams.FrameNumber,RecursionDepth));
-		RayDirection=ImportanceSampleCosWeight(make_float2(Noise4.x,Noise4.y),surfaceData.Normal);
-		RayOrigin=surfaceData.Position;
+		float3 BxdfWeight;
+		PrincipledBsdf(RecursionDepth,surfaceData,RayDirection,BxdfWeight,TraceGlass);
 		// 立即追踪bxdf光线
-		TraceRay(hitInfo,RayOrigin, RayDirection,1e-3f, 0, 2, 0);
+		TraceRay(hitInfo,surfaceData.Position, RayDirection,1e-3f, 0, 2, 0);
 		// 直接光
 		float3 SamplePoint = RandomSamplePointOnLight(make_float2(Noise4.w,Noise4.z));
 		float3 RayDirDirectLight = normalize(SamplePoint - RayOrigin);
 		float3 RadienceDirect=make_float3(0.0f);
-		
-		if (dot(surfaceData.Normal, RayDirDirectLight) > 1e-2f && RayDirDirectLight.z > 1e-2f) {
-			HitInfo hitInfoDirectLight;
-			TraceRay(hitInfoDirectLight, RayOrigin, RayDirDirectLight,1e-3f, 0, 2, 0);
-			float3 lightColor=hitInfoDirectLight.surfaceType==Light ? RayTracingGlobalParams.areaLight.Color : make_float3(0.0f);
-			float Dw = RayTracingGlobalParams.areaLight.Area * saturate(dot(surfaceData.Normal, RayDirDirectLight) + 1e-4f) * saturate(RayDirDirectLight.z) / squared_length(RayOrigin - SamplePoint);
-			RadienceDirect = lightColor * Dw * surfaceData.BaseColor * REVERSE_PI;
+		if(!TraceGlass){
+			if (dot(surfaceData.Normal, RayDirDirectLight) > 1e-2f && RayDirDirectLight.z > 1e-2f) {
+				HitInfo hitInfoDirectLight;
+				TraceRay(hitInfoDirectLight, RayOrigin, RayDirDirectLight,1e-3f, 0, 2, 0);
+				float3 lightColor=hitInfoDirectLight.surfaceType==Light ? RayTracingGlobalParams.areaLight.Color : make_float3(0.0f);
+				float Dw = RayTracingGlobalParams.areaLight.Area * saturate(dot(surfaceData.Normal, RayDirDirectLight) + 1e-4f) * saturate(RayDirDirectLight.z) / squared_length(RayOrigin - SamplePoint);
+				RadienceDirect = lightColor * Dw * surfaceData.BaseColor * REVERSE_PI;
+			}
+			// MIS
+			float PdfDiffuse=saturate(dot(surfaceData.Normal,RayDirection))*REVERSE_PI;
+			float PdfLight = 1 / RayTracingGlobalParams.areaLight.Area;
+			float MISWeight=1.0f;
+			if (hitInfo.surfaceType==Light) {
+				MISWeight=PdfDiffuse / (PdfDiffuse + PdfLight);
+				RadienceDirect*=(PdfLight) / (PdfDiffuse + PdfLight);
+			}
+			Radience+=Weight*RadienceDirect;
+			Weight*=BxdfWeight*MISWeight;
 		}
-		// MIS
-		float PdfDiffuse=saturate(dot(surfaceData.Normal,RayDirection))*REVERSE_PI;
-		float PdfLight = 1 / RayTracingGlobalParams.areaLight.Area;
-
-		float MISWeight=1.0f;
-		if (hitInfo.surfaceType==Light) {
-			MISWeight=PdfDiffuse / (PdfDiffuse + PdfLight);
-			RadienceDirect*=(PdfLight) / (PdfDiffuse + PdfLight);
+		else{
+			Weight*=BxdfWeight;
 		}
-		Radience+=Weight*RadienceDirect;
-		Weight*=surfaceData.BaseColor*MISWeight;
 	}
 	RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] =  Radience;
 }
@@ -392,7 +412,7 @@ extern "C" __global__ void __miss__fetchMissInfo()
 {
 	HitInfo hitInfo;
 	hitInfo.PrimitiveID=0xFFFFFFFF;
-	hitInfo.SbtDataPtr=((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;
+	hitInfo.SbtDataPtr=optixGetSbtDataPointer();
 	hitInfo.TriangleCentroidCoord=make_float2(0.0f);
 	hitInfo.surfaceType=Miss;
 	SetPayLoad(hitInfo);

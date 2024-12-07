@@ -5,9 +5,19 @@
 #include <ImfArray.h>
 #include "cuda.h"
 #include "cuda_runtime.h"
+#include <memory>
 
-static inline float4* ReadOpenExr(string path, uint& width, uint& height) {
-	Imf::RgbaInputFile file(path.c_str());
+#define TEXTURE_FORMAT_UCHAR1 0
+#define TEXTURE_FORMAT_UCHAR2 1
+#define TEXTURE_FORMAT_UCHAR3 2
+#define TEXTURE_FORMAT_UCHAR4 3
+#define TEXTURE_FORMAT_FLOAT1 4
+#define TEXTURE_FORMAT_FLOAT2 5
+#define TEXTURE_FORMAT_FLOAT3 6
+#define TEXTURE_FORMAT_FLOAT4 7
+
+static inline float4* ReadOpenExr(const char* path, uint& width, uint& height) {
+	Imf::RgbaInputFile file(path);
 	Imath::Box2i       dw = file.dataWindow();
 	int                w = dw.max.x - dw.min.x + 1;
 	int                h = dw.max.y - dw.min.y + 1;
@@ -31,19 +41,86 @@ static inline float4* ReadOpenExr(string path, uint& width, uint& height) {
 	return img;
 }
 
-template<typename T>
-class MyTexture {
+static inline unsigned char* ReadLDRImage(const char* path,uint& width,uint& height,uint& channel){
+	int w,h,c;
+	unsigned char* hostdata = stbi_load(path, &w, &h, &c, 0);
+	width=w;
+	height=h;
+	channel=c;
+	return hostdata;
+} 
+
+struct TextureView{
+	uint width;
+	uint height;
+	unsigned char textureFormat;
+	cudaTextureObject_t textureIdentifier;
+};
+
+class Texture2D {
 private:
+	unsigned char textureFormat;
 	cudaArray_t cuArray = nullptr;
 	cudaChannelFormatDesc channelDesc;
 	cudaTextureDesc texDesc;
 	cudaResourceDesc resDesc;
 	cudaTextureObject_t texObj = 0;
+	TextureView textureView;
 public:
 	cudaTextureObject_t GetTextureId() {
 		return texObj;
 	}
-	~MyTexture() {
+	static inline Texture2D LoadHDRImage(const char* path){
+		uint w,h;
+		float4* data=ReadOpenExr(path,w,h);
+		Texture2D instance=Texture2D(data,w,h,TEXTURE_FORMAT_FLOAT4);
+		free(data);
+		return instance;
+	}
+	inline TextureView GetTextureView(){
+		return textureView;
+	}
+	static inline Texture2D LoadLDRImage(const char* path){
+		uint w,h,channel;
+		unsigned char* data=ReadLDRImage(path,w,h,channel);
+		unsigned char textureFormat;
+		if(channel==1){
+			textureFormat=TEXTURE_FORMAT_UCHAR1;
+		}
+		else if(channel==2){
+			textureFormat=TEXTURE_FORMAT_UCHAR2;
+		}
+		else if(channel==3){
+			textureFormat=TEXTURE_FORMAT_UCHAR3;
+		}
+		else if(channel==4){
+			textureFormat=TEXTURE_FORMAT_UCHAR4;
+		}
+		else{
+			throw std::runtime_error("unsupport channel count when LoadLDRImage");
+		}
+		Texture2D instance=Texture2D(data,w,h,textureFormat);
+		free(data);
+		return instance;
+	}
+	static inline Texture2D LoadImageFromFile(string path){
+		 size_t dotPosition = path.find_last_of('.');
+		if (dotPosition == std::string::npos) {
+			throw std::runtime_error("unsupport no extension file");
+		}
+		string extension=path.substr(dotPosition + 1);
+		std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+		if(extension=="exr"){
+			return LoadHDRImage(path.c_str());
+		}
+		else{
+			return LoadLDRImage(path.c_str());
+		}
+	}
+	static inline Texture2D LoadImageFromFile(const char* path){
+		return LoadImageFromFile(path);
+	}
+	~Texture2D() {
 		// Destroy texture object
 		CUDA_CHECK(cudaDestroyTextureObject(texObj));
 
@@ -52,59 +129,48 @@ public:
 			CUDA_CHECK(cudaFreeArray(cuArray));
 		}
 	}
-	MyTexture() = delete;
-	MyTexture(T* h_data,uint width, uint height) {
-		channelDesc = cudaCreateChannelDesc<T>();
-		CUDA_CHECK(cudaMallocArray(&cuArray, &channelDesc, width, height));
-		const size_t spitch = width * sizeof(T);
-		// Copy data located at address h_data in host memory to device memory
-		CUDA_CHECK(cudaMemcpy2DToArray(cuArray, 0, 0, h_data, spitch, width * sizeof(T),height, cudaMemcpyHostToDevice));
-		memset(&texDesc, 0, sizeof(cudaTextureDesc));
-		texDesc.addressMode[0] = cudaAddressModeMirror;
-		texDesc.addressMode[1] = cudaAddressModeMirror;
-		texDesc.filterMode = cudaFilterModeLinear;
-		texDesc.readMode = cudaReadModeElementType;
-		texDesc.normalizedCoords = true;
-
-		memset(&resDesc, 0, sizeof(cudaResourceDesc));
-		resDesc.resType = cudaResourceTypeArray;
-		resDesc.res.array.array = cuArray;
-
-		CUDA_CHECK(cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL));
-		if (!cuArray) {
-			throw std::exception("空的纹理数组");
-		}
-		CUDA_CHECK(cudaDeviceSynchronize());
-	}
-};
-template<>
-class MyTexture<float4> {
+	Texture2D() = delete;
 private:
-	cudaArray_t cuArray = nullptr;
-	cudaChannelFormatDesc channelDesc;
-	cudaTextureDesc texDesc;
-	cudaResourceDesc resDesc;
-	cudaTextureObject_t texObj = 0;
-public:
-	cudaTextureObject_t GetTextureId() {
-		return texObj;
-	}
-	~MyTexture() {
-		// Destroy texture object
-		CUDA_CHECK(cudaDestroyTextureObject(texObj));
-
-		// Free device memory
-		if (cuArray) {
-			CUDA_CHECK(cudaFreeArray(cuArray));
+	Texture2D(void* h_data,uint width, uint height,unsigned char textureFormat) {
+		size_t sizeOfPixel;
+		if(textureFormat==TEXTURE_FORMAT_UCHAR1){
+			channelDesc = cudaCreateChannelDesc<uchar1>();
+			sizeOfPixel=sizeof(uchar1);
 		}
-	}
-	MyTexture() = delete;
-	MyTexture(float4* h_data, uint width, uint height) {
-		channelDesc = cudaCreateChannelDesc<float4>();
+		else if(textureFormat==TEXTURE_FORMAT_UCHAR2){
+			channelDesc = cudaCreateChannelDesc<uchar2>();
+			sizeOfPixel=sizeof(uchar2);
+		}
+		else if(textureFormat==TEXTURE_FORMAT_UCHAR3){
+			channelDesc = cudaCreateChannelDesc<uchar3>();
+			sizeOfPixel=sizeof(uchar3);
+		}
+		else if(textureFormat==TEXTURE_FORMAT_UCHAR4){
+			channelDesc = cudaCreateChannelDesc<uchar4>();
+			sizeOfPixel=sizeof(uchar4);
+		}
+		if(textureFormat==TEXTURE_FORMAT_FLOAT1){
+			channelDesc = cudaCreateChannelDesc<float>();
+			sizeOfPixel=sizeof(float);
+		}
+		else if(textureFormat==TEXTURE_FORMAT_FLOAT2){
+			channelDesc = cudaCreateChannelDesc<float2>();
+			sizeOfPixel=sizeof(float2);
+		}
+		else if(textureFormat==TEXTURE_FORMAT_FLOAT3){
+			channelDesc = cudaCreateChannelDesc<float3>();
+			sizeOfPixel=sizeof(float3);
+		}
+		else if(textureFormat==TEXTURE_FORMAT_FLOAT4){
+			channelDesc = cudaCreateChannelDesc<float4>();
+			sizeOfPixel=sizeof(float4);
+		}
+		else{
+			throw std::runtime_error("unsupport texture format!");
+		}
 		CUDA_CHECK(cudaMallocArray(&cuArray, &channelDesc, width, height));
-		const size_t spitch = width * sizeof(float4);
-		// Copy data located at address h_data in host memory to device memory
-		CUDA_CHECK(cudaMemcpy2DToArray(cuArray, 0, 0, h_data, spitch, width * sizeof(float4), height, cudaMemcpyHostToDevice));
+		const size_t spitch = width * sizeOfPixel;
+		CUDA_CHECK(cudaMemcpy2DToArray(cuArray, 0, 0, h_data, spitch, width * sizeOfPixel,height, cudaMemcpyHostToDevice));
 		memset(&texDesc, 0, sizeof(cudaTextureDesc));
 		texDesc.addressMode[0] = cudaAddressModeMirror;
 		texDesc.addressMode[1] = cudaAddressModeMirror;
@@ -118,34 +184,58 @@ public:
 
 		CUDA_CHECK(cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL));
 		if (!cuArray) {
-			throw std::exception("空的纹理数组");
+			throw std::runtime_error("empty texture array!");
 		}
 		CUDA_CHECK(cudaDeviceSynchronize());
-	}
-	MyTexture(string path) {
-		uint width, height;
-		float4* h_data = ReadOpenExr(path, width, height);
-		channelDesc = cudaCreateChannelDesc<float4>();
-		CUDA_CHECK(cudaMallocArray(&cuArray, &channelDesc, width, height));
-		const size_t spitch = width * sizeof(float4);
-		// Copy data located at address h_data in host memory to device memory
-		CUDA_CHECK(cudaMemcpy2DToArray(cuArray, 0, 0, h_data, spitch, width * sizeof(float4), height, cudaMemcpyHostToDevice));
-		memset(&texDesc, 0, sizeof(cudaTextureDesc));
-		texDesc.addressMode[0] = cudaAddressModeMirror;
-		texDesc.addressMode[1] = cudaAddressModeMirror;
-		texDesc.filterMode = cudaFilterModeLinear;
-		texDesc.readMode = cudaReadModeElementType;
-		texDesc.normalizedCoords = true;
-
-		memset(&resDesc, 0, sizeof(cudaResourceDesc));
-		resDesc.resType = cudaResourceTypeArray;
-		resDesc.res.array.array = cuArray;
-
-		CUDA_CHECK(cudaCreateTextureObject(&texObj, &resDesc, &texDesc, NULL));
-		if (!cuArray) {
-			throw std::exception("空的纹理数组");
-		}
-		CUDA_CHECK(cudaDeviceSynchronize());
-		free(h_data);
+		textureView={width,height,textureFormat,texObj};
 	}
 };
+
+class TextureManager {
+	// 用来管理所有的材质
+	// 采取单例模式
+private:
+	//vector<TextureView> textureDiscriptorsRange;
+	vector<Texture2D> textureObjects;
+	uint64 NumTextures = 0;
+public:
+	static TextureManager* instance;
+	//TextureManager(const TextureManager&) = delete;
+	TextureManager& operator=(const TextureManager&) = delete;
+	static inline TextureManager* GetInstance() {
+		if (instance == nullptr) {
+			instance = new TextureManager();
+		}
+		return instance;
+	}
+	static inline void DeleteInstance() {
+		if (instance != nullptr) {
+			delete instance;
+		}
+	}
+	//static inline TextureView* GetData() {
+	//	auto ins = GetInstance();
+	//	return ins->textureDiscriptorsRange.data();
+	//}
+	static inline Texture2D* QueryTex2DWithIndex(uint64 index) {
+		auto ins = GetInstance();
+		return &ins->textureObjects[index];
+	}
+	//static inline size_t GetSize() {
+	//	auto ins = GetInstance();
+	//	return ins->textureDiscriptorsRange.size();
+	//}
+	static inline uint64 Add(Texture2D&& textureObject) {
+		auto instance = GetInstance();
+		//instance->textureDiscriptorsRange.push_back(textureObject.GetTextureView());
+		instance->textureObjects.push_back(textureObject);
+		return instance->NumTextures++;
+	}
+};
+
+
+
+
+
+
+

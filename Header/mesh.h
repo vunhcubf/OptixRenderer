@@ -9,9 +9,9 @@
 #include <vector_functions.h>
 
 #include "common.h"
-struct MyMesh {
-	static MyMesh LoadMeshFromFile(std::string path);
-	~MyMesh();
+struct Mesh {
+	static Mesh LoadMeshFromFile(std::string path);
+	~Mesh();
 	size_t GetVerticesCount();
 	size_t GetIndicesCount();
 	void* GetVerticesPtr();

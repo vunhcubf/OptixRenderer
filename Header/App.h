@@ -54,7 +54,7 @@ public:
 	CameraData ExportCameraData(int width, int height);
 };
 //实现场景管理
-//一个物体包括一个网格体，一个底层加速结构，一份模型和材质数据，若干sbt记录
+//一个物体包括一个网格体，一个底层加速结构， 一份模型和材质数据，若干sbt记录
 //渲染准备部分执行的逻辑有：
 //加载模型、生成GAS、TAS
 //创建程序组、创建管线
@@ -63,7 +63,7 @@ public:
 using namespace std;
 //要统一每个物体的sbt数量
 struct ObjectDesc {
-	MyMesh mesh;
+	Mesh mesh;
 	Material mat;
 	vector<string> shaders;
 };

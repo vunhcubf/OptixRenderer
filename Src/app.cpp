@@ -89,7 +89,7 @@ OptixTraversableHandle SceneManager::GetTraversableHandle()
 void SceneManager::AddObjects(ObjectDesc desc, string Name)
 {
 	//¹¹½¨gas
-	MyMesh& mesh = desc.mesh;
+	Mesh& mesh = desc.mesh;
 	OptixTraversableHandle Handle;
 	UniquePtrDevice GASOutputBuffer;
 	OptixAccelBuildOptions AccelBuildOpts = {};

@@ -44,7 +44,7 @@ const char* fragmentShaderSource = "#version 330 core\n"
 "void main() {\n"
 "FragColor = texture(textureSampler, TexCoords);\n"
 "}\n\0";
-
+TextureManager* TextureManager::instance = nullptr;
 void main() {
 	try {
 		string CUDAIncludePath = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3/include";
@@ -108,10 +108,12 @@ void main() {
 				file.close();
 			}
 		}
-		MyTexture<float4> SkyBoxTex(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr");
-		MyTexture<float4> SkyBoxTex2(ProjectPath + "/Assets/Textures/citrus_orchard_road_2k.exr");
-		MyTexture<float4> SkyBoxTex3(ProjectPath + "/Assets/Textures/autumn_field_puresky_2k.exr");
-		MyTexture<float4> SkyBoxStudio(ProjectPath + "/Assets/Textures/studio_small_05_2k.exr");
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr");
+		//uint64 SkyBoxTex=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr"));
+		//uint64 SkyBoxTex2=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/citrus_orchard_road_2k.exr"));
+		//uint64 SkyBoxTex3=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/autumn_field_puresky_2k.exr"));
+		//uint64 SkyBoxStudio=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/studio_small_05_2k.exr"));
+		
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
 		double2 MousePos;
@@ -146,13 +148,12 @@ void main() {
 
 		scene.AddHitShader("CH_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
 
-		// ÐÂµÄobj¼ÓÔØÆ÷
 		{
 			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
 			for (const auto& one : cornel) {
 				const string& name = one.first;
-				const MyMesh& mesh = one.second.first;
-				const Material& mat = one.second.second;
+				const Mesh& mesh = one.second.first;
+				Material mat = one.second.second;
 				ObjectDesc desc;
 				desc.mesh = mesh;
 				desc.mat = mat;
@@ -164,7 +165,7 @@ void main() {
 			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj");
 			for (const auto& one : sponza) {
 				const string& name = one.first;
-				const MyMesh& mesh = one.second.first;
+				const Mesh& mesh = one.second.first;
 				const Material& mat = one.second.second;
 				ObjectDesc desc;
 				desc.mesh = mesh;
@@ -175,12 +176,13 @@ void main() {
 		}
 		{string name = "area_light";
 		ObjectDesc desc;
-		desc.mesh = MyMesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
+		desc.mesh = Mesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
 		desc.mat.MaterialType = MATERIAL_AREALIGHT;
 		desc.shaders = { "CH_fetchHitInfo","CH_fetchHitInfo" };
 		scene.AddObjects(desc, name); }
 
-		scene.ConfigureMissSbt({ make_float3(0.5f,0.5f,0.5f),1.0f,SkyBoxTex.GetTextureId()});
+		//scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,TextureManager::QueryTex2DWithIndex(SkyBoxTex2)->GetTextureView().textureIdentifier});
+		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView().textureIdentifier });
 		scene.ConfigureRGSbt({ 1.0f,0.0f,1.0f });
 		scene.BuildScene();
 
@@ -196,6 +198,10 @@ void main() {
 		LaunchParametersDesc desc;
 		desc.areaLight = Light;
 		desc.cameraData = camera.ExportCameraData(default_width, default_height);
+
+		//UniquePtrDevice textureViewsDevice;
+		//CUDA_CHECK(cudaMalloc(textureViewsDevice.GetAddressOfPtr(),sizeof(TextureManager)*TextureManager::GetSize()));
+		//CUDA_CHECK(cudaMemcpy(textureViewsDevice.GetPtr(),));
 
 		glfwInit();
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -526,6 +532,8 @@ void main() {
 		glDeleteTextures(1, &texture);
 		glfwDestroyWindow(window);
 		glfwTerminate();
+
+		TextureManager::DeleteInstance();
 		return;
 	}
 	catch (std::exception& e)

@@ -8,13 +8,13 @@ extern "C" __global__ void AccumulateFrame(uint PixelCount, uint64 FrameCounter,
 	if (Idx >= PixelCount) { return; }
 	//帧计数器表示前面已渲染了N帧
 	float3 AccumulatedColor = FrameCounter * fmaxf(make_float3(0), AccumulateBuffer[Idx]) + fmaxf(make_float3(0), IndirectOutputBuffer[Idx]);
-	float brightness = length(AccumulatedColor);
-	if (brightness < 0.0f) {
-		AccumulatedColor = make_float3(0, 0, 1);
-	}
-	else if (brightness > 1e6f) {
-		AccumulatedColor = make_float3(1, 0, 0);
-	}
+	// float brightness = length(AccumulatedColor);
+	// if (brightness < 0.0f) {
+	// 	AccumulatedColor = make_float3(0, 0, 1);
+	// }
+	// else if (brightness > 1e6f) {
+	// 	AccumulatedColor = make_float3(1, 0, 0);
+	// }
 	AccumulateBuffer[Idx] = AccumulatedColor / (FrameCounter + 1);
 	OutputSRGBBuffer[Idx] = make_color(ACESFilm(AccumulatedColor / (FrameCounter + 1)));
 }
