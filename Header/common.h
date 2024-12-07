@@ -19,6 +19,7 @@
 #include <curand_kernel.h>
 #include <filesystem>
 #include <cstdlib>
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC 
 #include "stb/include/stb_image.h"

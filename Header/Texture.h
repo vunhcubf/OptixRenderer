@@ -36,7 +36,6 @@ static inline float4* ReadOpenExr(const char* path, uint& width, uint& height) {
 			img[ih + iw * h].z = pixels[w - 1 - iw][ih].b;
 			img[ih + iw * h].w = pixels[w - 1 - iw][ih].a;
 		}
-		cout << endl;
 	}
 	return img;
 }

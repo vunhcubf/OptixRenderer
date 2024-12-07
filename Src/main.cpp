@@ -10,6 +10,20 @@
 #include "random_host.h"
 #include <windows.h>
 #include "ComputeShader.h"
+void writeToFile(const std::string& filename, const std::string& content, bool append = false) {
+    std::ofstream outFile;
+    if (append) {
+        outFile.open(filename, std::ios::app);
+    } else {
+        outFile.open(filename);
+    }
+    if (outFile.is_open()) {
+        outFile << content << std::endl;
+        outFile.close();
+    } else {
+        std::cerr << "Failed to open the file: " << filename << std::endl;
+    }
+}
 inline std::string getExecutablePath() {
     char path[MAX_PATH];
     if (GetModuleFileNameA(NULL, path, MAX_PATH) > 0) {
@@ -59,9 +73,12 @@ void main() {
 		ShaderCollection shader_sources = ReadShaderSources(ProjectPath);
 		// 先检测有哪些shader，对于存在的shader比较hash值，对于新的shader直接加入编译
 		// 开始编译
+		stringstream compilationOutput;
 		{
+			
 			for (auto& shader_to_compile_inst : shader_sources) {
-				std::cout << "正在编译着色器：" << shader_to_compile_inst.first << endl;
+				//std::cout << "正在编译着色器：" << shader_to_compile_inst.first << endl;
+				compilationOutput<< "正在编译着色器：" << shader_to_compile_inst.first<<"\n";
 				nvrtcProgram prog;
 				nvrtcCreateProgram(&prog,             // 程序
 					shader_to_compile_inst.second.c_str(),    // 源码字符串
@@ -87,7 +104,8 @@ void main() {
 					nvrtcGetProgramLogSize(prog, &logSize);
 					std::vector<char> log(logSize);
 					nvrtcGetProgramLog(prog, log.data());
-					std::cerr << "Compilation error:"<<compileResult<<"\n" << log.data() << std::endl;
+					compilationOutput<<"Compilation error:"<<compileResult<<"\n" << log.data() << "\n";
+					//std::cerr << "Compilation error:"<<compileResult<<"\n" << log.data() << std::endl;
 				}
 		
 				// 获取 PTX 代码
@@ -99,7 +117,8 @@ void main() {
 				std::ofstream file(CompiledShaderPath+"/"+ shader_to_compile_inst.first+".ptx");
 		
 				if (!file) {
-					std::cerr << "Error opening file for writing: " << shader_to_compile_inst.first<<".ptx" << std::endl;
+					compilationOutput<< "Error opening file for writing: " << shader_to_compile_inst.first<<".ptx" << "\n";
+					//std::cerr << "Error opening file for writing: " << shader_to_compile_inst.first<<".ptx" << std::endl;
 					return;
 				}
 		
@@ -107,13 +126,14 @@ void main() {
 		
 				file.close();
 			}
+			
 		}
+		std::cout<<compilationOutput.str()<<std::endl;
 		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr");
 		//uint64 SkyBoxTex=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr"));
 		//uint64 SkyBoxTex2=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/citrus_orchard_road_2k.exr"));
 		//uint64 SkyBoxTex3=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/autumn_field_puresky_2k.exr"));
 		//uint64 SkyBoxStudio=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/studio_small_05_2k.exr"));
-		
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
 		double2 MousePos;
@@ -127,7 +147,6 @@ void main() {
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
-
 		scene.ImportCompiledShader(ProjectPath + "/CompiledShaders/smallpt_styled.cu.ptx", "module_smallpt_styled");
 		scene.ImportCompiledShader(ProjectPath + "/CompiledShaders/basic.cu.ptx", "module_basic");
 		scene.ImportCompiledShader(ProjectPath + "/CompiledShaders/disney_principled_pt.cu.ptx", "module_disney_principled");
@@ -139,13 +158,12 @@ void main() {
 
 		scene.AddMissShader("__miss__fetchMissInfo", "module_disney_principled");
 		scene.AddRayGenerationShader("__raygen__principled_bsdf", "module_disney_principled");
+
 		scene.AddHitShader("CH_diffuse", "module_smallpt_styled", "__closesthit__diffuse", "", "");
 		scene.AddHitShader("CH_glossy", "module_smallpt_styled", "__closesthit__glossy", "", "");
 		scene.AddHitShader("CH_glass", "module_smallpt_styled", "__closesthit__glass", "", "");
 		scene.AddHitShader("CH_occluded", "module_smallpt_styled", "__closesthit__occluded", "", "");
-
 		scene.AddHitShader("CH_principled_bsdf", "module_disney_principled", "__closesthit__principled_bsdf", "", "");
-
 		scene.AddHitShader("CH_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
 
 		{
