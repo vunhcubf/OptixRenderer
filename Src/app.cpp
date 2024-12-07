@@ -396,10 +396,3 @@ MyCamera::MyCamera(float3 Pos, float2 Rotate) {
 	RightDirection = make_float3(cosf(mTheta + M_PI / 2), sinf(mTheta + M_PI / 2), 0);
 	UpDirection = CrossProduct(RightDirection, ForwardDirection);
 }
-
-void BeforeRendering(){
-
-}
-void Update(){
-	
-}

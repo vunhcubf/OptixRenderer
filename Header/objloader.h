@@ -7,6 +7,8 @@
 #include <vector>
 #include <exception>
 #include <algorithm>
+#include "Texture.h"
+#include <bitset>
 using std::vector;
 using std::string;
 typedef std::unordered_map<string, std::pair<Mesh, Material>> ObjLoadResult;
@@ -112,11 +114,13 @@ inline unordered_map<string, Material> LoadMtl(string path) {
 	return mats;
 }
 
-inline unordered_map<string, Material> LoadMtl(string path, unordered_map<string,string>& TextureResources) {
+// 元组中的string表示纹理的名字
+inline unordered_map<string, Material> LoadMtl(string path, unordered_map<string,tuple<string,Texture2D>>& TextureResources) {
 	unordered_map<string, Material> mats;
 	vector<Material> materials;
 	vector<string> names;
 	std::ifstream ifs;
+	unordered_map<string, Texture2D> textureCollectionDiffuse;
 	ifs.open(path);
 	if (!ifs.is_open()) {
 		std::stringstream ss;
@@ -168,17 +172,24 @@ inline unordered_map<string, Material> LoadMtl(string path, unordered_map<string
 				Temp.Roughness = std::atof(tokens.at(1).c_str());
 			}
 			else if(tokens.at(0) == "map_Kd"){
-				TextureResources[names.back()+string(" map_Kd")]=tokens.at(1);
+				auto tex=Texture2D::LoadImageFromFile(tokens.at(1));
+				tex.SetIfReleaseGpuArrayWhenDispose(false);
+				textureCollectionDiffuse[names.back()] = tex;
 			}
 		}
 		Temp.MaterialType=MaterialType::MATERIAL_OBJ;
 		materials.push_back(Temp);
 	}
 	for (uint i = 0; i < names.size(); i++) {
+		if (textureCollectionDiffuse.find(names.at(i)) != textureCollectionDiffuse.end()) {
+			materials.at(i).BaseColorMap = textureCollectionDiffuse[names.at(i)].GetTextureView().textureIdentifier;
+			TextureResources[names.at(i)] = { "BaseColorMap",textureCollectionDiffuse[names.at(i)] };
+		}
 		mats.insert({ names.at(i),materials.at(i) });
 	}
 	return mats;
 }
+
 
 inline ObjLoadResult LoadObj(string path) {
 	// 若干缓冲区，可重复利用
@@ -337,7 +348,7 @@ inline ObjLoadResult LoadObj(string path) {
 	}
 }
 
-inline ObjLoadResult LoadObj(string path,unordered_map<string,string>& TextureResources) {
+inline ObjLoadResult LoadObj(string path, unordered_map<string, tuple<string, Texture2D>>& TextureResources) {
 	// 若干缓冲区，可重复利用
 	vector<float3> vertices_temp;
 	vector<float3> normal_temp;

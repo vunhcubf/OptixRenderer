@@ -1,44 +1,15 @@
 #include <sutil.h>
 #include <ctime>
 #include "App.h"
-#include "Texture.h"
-#include "objloader.h"
 #include <bitset>
 #include <GLDisplay.h>
 #include <atomic>
 #include "runtime_shader_compile.h"
 #include "random_host.h"
 #include <windows.h>
-#include "ComputeShader.h"
-void writeToFile(const std::string& filename, const std::string& content, bool append = false) {
-    std::ofstream outFile;
-    if (append) {
-        outFile.open(filename, std::ios::app);
-    } else {
-        outFile.open(filename);
-    }
-    if (outFile.is_open()) {
-        outFile << content << std::endl;
-        outFile.close();
-    } else {
-        std::cerr << "Failed to open the file: " << filename << std::endl;
-    }
-}
-inline std::string getExecutablePath() {
-    char path[MAX_PATH];
-    if (GetModuleFileNameA(NULL, path, MAX_PATH) > 0) {
-        return std::string(path);
-    }
-    return "";
-}
-inline std::string getParentDir(std::string path) {
-    std::filesystem::path filepath=path;
-    return filepath.parent_path().string();
-}
-const uint default_width = 1024;
-const uint default_height = 1024;
+
 using namespace sutil;
-const char* vertexShaderSource = "#version 330 core\n"
+static const char* vertexShaderSource = "#version 330 core\n"
 "layout (location = 0) in vec2 aPos;\n"
 "layout (location = 1) in vec2 aTexCoords;\n"
 
@@ -48,7 +19,7 @@ const char* vertexShaderSource = "#version 330 core\n"
 "gl_Position = vec4(aPos.x, aPos.y, 0.0, 1.0);\n"
 "TexCoords = aTexCoords;\n"
 "}\n\0";
-const char* fragmentShaderSource = "#version 330 core\n"
+static const char* fragmentShaderSource = "#version 330 core\n"
 "out vec4 FragColor;\n"
 
 "in vec2 TexCoords;\n"
@@ -167,7 +138,8 @@ void main() {
 		scene.AddHitShader("CH_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
 
 		{
-			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
+			unordered_map<string, tuple<string, Texture2D>> TextureResourcesForThis;
+			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj", TextureResourcesForThis);
 			for (const auto& one : cornel) {
 				const string& name = one.first;
 				const Mesh& mesh = one.second.first;
@@ -180,7 +152,8 @@ void main() {
 			}
 		}
 		{
-			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj");
+			unordered_map<string, tuple<string, Texture2D>> TextureResourcesForThis;
+			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj", TextureResourcesForThis);
 			for (const auto& one : sponza) {
 				const string& name = one.first;
 				const Mesh& mesh = one.second.first;
@@ -217,6 +190,44 @@ void main() {
 		desc.areaLight = Light;
 		desc.cameraData = camera.ExportCameraData(default_width, default_height);
 
+		int prev_width = default_width;
+		int prev_height = default_height;
+		//游戏计时器
+		using namespace std::chrono;
+		auto start = high_resolution_clock::now();
+		int64 delta_time = 0;
+		//上一帧的鼠标位置
+		//相机和灯光选项
+		UniquePtrDevice LParams;
+		CUDA_CHECK(cudaMalloc(LParams.GetAddressOfPtr(), sizeof(LaunchParameters)));
+		bool FirstTime = true;
+		//帧计数器
+		uint64 FrameCounter = 0;
+		//相机数据在lparams中的地址偏移
+		LaunchParameters* p = nullptr;
+		uint64 AddressBiasOfFrameNumberInLaunchParams = (uint64)(&p->FrameNumber) - (uint64)(p);
+		uint64 AddressBiasOfCameraDataInLaunchParams = (uint64)(&p->cameraData) - (uint64)(p);
+		uint64 AddressBiasOfSeedInLaunchParams = (uint64)(&p->Seed) - (uint64)(p);
+		uint64 AddressBiasOfHeightInLaunchParams = (uint64)(&p->Height) - (uint64)(p);
+		uint64 AddressBiasOfWidthInLaunchParams = (uint64)(&p->Width) - (uint64)(p);
+		uint64 AddressBiasOfPixelOffsetInLaunchParams = (uint64)(&p->PixelOffset) - (uint64)(p);
+		uint64 AddressBiasOfIndirectOutputBufferInLaunchParams = (uint64)(&p->IndirectOutputBuffer) - (uint64)(p);
+		//创建渲染纹理用于帧结果累计
+		//希望渲染纹理不要频繁申请释放
+		const uint expected_max_width = (uint)GetSystemMetrics(SM_CXSCREEN);
+		const uint expected_max_height = (uint)GetSystemMetrics(SM_CYSCREEN);
+		UniquePtrDevice FrameBuffer2, FrameBuffer3;
+		CUDA_CHECK(cudaMalloc(FrameBuffer2.GetAddressOfPtr(), sizeof(float3) * expected_max_width * expected_max_height));
+		CUDA_CHECK(cudaMalloc(FrameBuffer3.GetAddressOfPtr(), sizeof(float3) * expected_max_width * expected_max_height));
+		uint64 FrameNumber = 0;
+
+		// 初始化随机数器
+		uint64* RandomGeneratorPixelOffset;
+		{
+			uint PixelCount=prev_height*prev_width;
+			CUDA_CHECK(cudaMalloc(&RandomGeneratorPixelOffset,sizeof(uint64)*PixelCount));
+			CUDA_CHECK(cudaMemset(RandomGeneratorPixelOffset,0,sizeof(uint64)*PixelCount));
+		}
 		//UniquePtrDevice textureViewsDevice;
 		//CUDA_CHECK(cudaMalloc(textureViewsDevice.GetAddressOfPtr(),sizeof(TextureManager)*TextureManager::GetSize()));
 		//CUDA_CHECK(cudaMemcpy(textureViewsDevice.GetPtr(),));
@@ -327,45 +338,6 @@ void main() {
 		CUDA_CHECK(cudaStreamCreate(&Stream));
 		// render loop
 		// -----------
-		int prev_width = default_width;
-		int prev_height = default_height;
-		//游戏计时器
-		using namespace std::chrono;
-		auto start = high_resolution_clock::now();
-		int64 delta_time = 0;
-		//上一帧的鼠标位置
-		//相机和灯光选项
-		UniquePtrDevice LParams;
-		CUDA_CHECK(cudaMalloc(LParams.GetAddressOfPtr(), sizeof(LaunchParameters)));
-		bool FirstTime = true;
-		//帧计数器
-		uint64 FrameCounter = 0;
-		//相机数据在lparams中的地址偏移
-		LaunchParameters* p = nullptr;
-		uint64 AddressBiasOfFrameNumberInLaunchParams = (uint64)(&p->FrameNumber) - (uint64)(p);
-		uint64 AddressBiasOfCameraDataInLaunchParams = (uint64)(&p->cameraData) - (uint64)(p);
-		uint64 AddressBiasOfSeedInLaunchParams = (uint64)(&p->Seed) - (uint64)(p);
-		uint64 AddressBiasOfHeightInLaunchParams = (uint64)(&p->Height) - (uint64)(p);
-		uint64 AddressBiasOfWidthInLaunchParams = (uint64)(&p->Width) - (uint64)(p);
-		uint64 AddressBiasOfPixelOffsetInLaunchParams = (uint64)(&p->PixelOffset) - (uint64)(p);
-		uint64 AddressBiasOfIndirectOutputBufferInLaunchParams = (uint64)(&p->IndirectOutputBuffer) - (uint64)(p);
-		//创建渲染纹理用于帧结果累计
-		//希望渲染纹理不要频繁申请释放
-		const uint expected_max_width = (uint)GetSystemMetrics(SM_CXSCREEN);
-		const uint expected_max_height = (uint)GetSystemMetrics(SM_CYSCREEN);
-		UniquePtrDevice FrameBuffer2, FrameBuffer3;
-		CUDA_CHECK(cudaMalloc(FrameBuffer2.GetAddressOfPtr(), sizeof(float3) * expected_max_width * expected_max_height));
-		CUDA_CHECK(cudaMalloc(FrameBuffer3.GetAddressOfPtr(), sizeof(float3) * expected_max_width * expected_max_height));
-		uint64 FrameNumber = 0;
-
-		// 初始化随机数器
-		uint64* RandomGeneratorPixelOffset;
-		{
-			uint PixelCount=prev_height*prev_width;
-			CUDA_CHECK(cudaMalloc(&RandomGeneratorPixelOffset,sizeof(uint64)*PixelCount));
-			CUDA_CHECK(cudaMemset(RandomGeneratorPixelOffset,0,sizeof(uint64)*PixelCount));
-		}
-
 		while (!glfwWindowShouldClose(window))
 		{
 			int width, height;

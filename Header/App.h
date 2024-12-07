@@ -11,7 +11,9 @@
 #include <filesystem>
 #include <cuda_gl_interop.h>
 
-
+#include "ComputeShader.h"
+#include "Texture.h"
+#include "objloader.h"
 
 enum INPUT_TYPE {
 	W,
@@ -144,6 +146,3 @@ public:
 	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParametersDesc LParamsDesc, uint Width, uint Height, uint Spp);
 	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height);
 };
-
-void BeforeRendering();
-void Update();

@@ -1,20 +1,13 @@
 #pragma once
 
-
 #include <optix.h>
-
 #include <optix_stack_size.h>
-
-
 #include <cuda_runtime.h>
-
 #include "Exception.h"
-
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <array>
-
 #include "common.h"
 #include "mesh.h"
 

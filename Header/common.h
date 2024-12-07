@@ -32,7 +32,8 @@ typedef double float64;
 
 // Ç°ÏòÉùÃ÷
 struct TextureView;
-
+using std::string;
+using namespace::std;
 #define NO_TEXTURE_HERE 0xFFFFFFFF
 template <typename T>
 struct SbtRecord
@@ -279,3 +280,30 @@ __device__ __host__ float3 float3_scale(const float3& a, const float& b);
 
 __device__ __host__ float3 CrossProduct(float3 a, float3 b);
 
+inline void writeToFile(const std::string& filename, const std::string& content, bool append = false) {
+    std::ofstream outFile;
+    if (append) {
+        outFile.open(filename, std::ios::app);
+    } else {
+        outFile.open(filename);
+    }
+    if (outFile.is_open()) {
+        outFile << content << std::endl;
+        outFile.close();
+    } else {
+        std::cerr << "Failed to open the file: " << filename << std::endl;
+    }
+}
+inline std::string getExecutablePath() {
+    char path[MAX_PATH];
+    if (GetModuleFileNameA(NULL, path, MAX_PATH) > 0) {
+        return std::string(path);
+    }
+    return "";
+}
+inline std::string getParentDir(std::string path) {
+    std::filesystem::path filepath=path;
+    return filepath.parent_path().string();
+}
+const uint default_width = 1024;
+const uint default_height = 1024;

@@ -65,7 +65,11 @@ private:
 	cudaResourceDesc resDesc;
 	cudaTextureObject_t texObj = 0;
 	TextureView textureView;
+	bool releaseGpuArrayWhenDispose = true;
 public:
+	void SetIfReleaseGpuArrayWhenDispose(bool boolean) {
+		releaseGpuArrayWhenDispose = boolean;
+	}
 	cudaTextureObject_t GetTextureId() {
 		return texObj;
 	}
@@ -79,6 +83,7 @@ public:
 	inline TextureView GetTextureView(){
 		return textureView;
 	}
+	Texture2D()=default;
 	static inline Texture2D LoadLDRImage(const char* path){
 		uint w,h,channel;
 		unsigned char* data=ReadLDRImage(path,w,h,channel);
@@ -120,15 +125,17 @@ public:
 		return LoadImageFromFile(path);
 	}
 	~Texture2D() {
-		// Destroy texture object
-		CUDA_CHECK(cudaDestroyTextureObject(texObj));
+		if (releaseGpuArrayWhenDispose) {
+			// Destroy texture object
+			CUDA_CHECK(cudaDestroyTextureObject(texObj));
 
-		// Free device memory
-		if (cuArray) {
-			CUDA_CHECK(cudaFreeArray(cuArray));
+			// Free device memory
+			if (cuArray) {
+				CUDA_CHECK(cudaFreeArray(cuArray));
+			}
 		}
 	}
-	Texture2D() = delete;
+	//Texture2D() = delete;
 private:
 	Texture2D(void* h_data,uint width, uint height,unsigned char textureFormat) {
 		size_t sizeOfPixel;
@@ -148,7 +155,7 @@ private:
 			channelDesc = cudaCreateChannelDesc<uchar4>();
 			sizeOfPixel=sizeof(uchar4);
 		}
-		if(textureFormat==TEXTURE_FORMAT_FLOAT1){
+		else if(textureFormat==TEXTURE_FORMAT_FLOAT1){
 			channelDesc = cudaCreateChannelDesc<float>();
 			sizeOfPixel=sizeof(float);
 		}
@@ -165,7 +172,10 @@ private:
 			sizeOfPixel=sizeof(float4);
 		}
 		else{
-			throw std::runtime_error("unsupport texture format!");
+			stringstream ss;
+			ss << "unsupport texture format! it's " << textureFormat;
+			std::cerr << ss.str()<<endl;
+			throw std::runtime_error(ss.str());
 		}
 		CUDA_CHECK(cudaMallocArray(&cuArray, &channelDesc, width, height));
 		const size_t spitch = width * sizeOfPixel;
@@ -173,7 +183,7 @@ private:
 		memset(&texDesc, 0, sizeof(cudaTextureDesc));
 		texDesc.addressMode[0] = cudaAddressModeMirror;
 		texDesc.addressMode[1] = cudaAddressModeMirror;
-		texDesc.filterMode = cudaFilterModeLinear;
+		texDesc.filterMode = textureFormat<=3? cudaFilterModePoint :cudaFilterModeLinear;
 		texDesc.readMode = cudaReadModeElementType;
 		texDesc.normalizedCoords = true;
 
@@ -195,7 +205,7 @@ class TextureManager {
 	// 采取单例模式
 private:
 	//vector<TextureView> textureDiscriptorsRange;
-	vector<Texture2D> textureObjects;
+	vector<Texture2D*> textureObjects;
 	uint64 NumTextures = 0;
 public:
 	static TextureManager* instance;
@@ -218,13 +228,13 @@ public:
 	//}
 	static inline Texture2D* QueryTex2DWithIndex(uint64 index) {
 		auto ins = GetInstance();
-		return &ins->textureObjects[index];
+		return ins->textureObjects[index];
 	}
 	//static inline size_t GetSize() {
 	//	auto ins = GetInstance();
 	//	return ins->textureDiscriptorsRange.size();
 	//}
-	static inline uint64 Add(Texture2D&& textureObject) {
+	static inline uint64 Add(Texture2D* textureObject) {
 		auto instance = GetInstance();
 		//instance->textureDiscriptorsRange.push_back(textureObject.GetTextureView());
 		instance->textureObjects.push_back(textureObject);

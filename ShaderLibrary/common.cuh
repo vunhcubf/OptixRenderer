@@ -653,8 +653,10 @@ struct SurfaceData{
 		GeometryNormal = normalize(cross(v1 - v2, v1 - v3));
 		Position=v1 * Centrics.x + v2 * Centrics.y + v3 * Centrics.z;
 		if (ModelDataptr->MaterialData->BaseColorMap != NO_TEXTURE_HERE) {
-			float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
-			BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
+			//float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
+			//BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
+			uchar4 tmp = SampleTexture2D<uchar4>(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
+			BaseColor = make_float3(tmp.x/255.0, tmp.y/255.0, tmp.z/255.0);
 		}
 		else {
 			BaseColor = ModelDataptr->MaterialData->BaseColor;
