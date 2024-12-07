@@ -59,16 +59,16 @@ extern "C" __global__ void __closesthit__principled_bsdf()
 		GetTriangle(v1, v2, v3);
 		N_Geo = normalize(cross(v1 - v2, v1 - v3));
 	}
-	if (ModelDataptr->MaterialData->BaseColorMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->BaseColorMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->BaseColorMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->BaseColorMap, uv.x, uv.y);
 		BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
 	}
 	else {
 		BaseColor = ModelDataptr->MaterialData->BaseColor;
 	}
 	BaseColor *= AO;
-	if (ModelDataptr->MaterialData->ARMMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->ARMMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->ARMMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->ARMMap, uv.x, uv.y);
 		Roughness = tmp.y;
 		Metallic = tmp.z;
 		AO = tmp.x;
@@ -81,8 +81,8 @@ extern "C" __global__ void __closesthit__principled_bsdf()
 	float Transmission = ModelDataptr->MaterialData->Transmission;
 	float ior = ModelDataptr->MaterialData->Ior;
 	ior = fmaxf(ior, 1.0001f);
-	if (ModelDataptr->MaterialData->NormalMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->NormalMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->NormalMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->NormalMap, uv.x, uv.y);
 		NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
 		N = UseNormalMap(N, NormalMap, 1.0f);
 	}
@@ -325,8 +325,8 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 	if(hitInfo.surfaceType==Miss){
 		MissData* data = (MissData*)hitInfo.SbtDataPtr;
 		float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
-		if (data->SkyBox != NO_TEXTURE_HERE) {
-			float4 skybox = SampleTexture2D<float4>(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
+		if (IsTextureViewValid(data->SkyBox)) {
+			float4 skybox = SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
 			RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = make_float3(skybox.x, skybox.y, skybox.z);
 		}
 		else {
@@ -344,8 +344,8 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		if(hitInfo.surfaceType==Miss){
 			MissData* data = (MissData*)hitInfo.SbtDataPtr;
 			float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
-			if (data->SkyBox != NO_TEXTURE_HERE) {
-				float4 skybox = SampleTexture2D<float4>(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
+			if (IsTextureViewValid(data->SkyBox)) {
+				float4 skybox = SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
 				Radience+=Weight*make_float3(skybox.x, skybox.y, skybox.z);
 			}
 			else {

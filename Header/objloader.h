@@ -121,6 +121,8 @@ inline unordered_map<string, Material> LoadMtl(string path, unordered_map<string
 	vector<string> names;
 	std::ifstream ifs;
 	unordered_map<string, Texture2D> textureCollectionDiffuse;
+	unordered_map<string, Texture2D> textureCollectionNormal;
+	unordered_map<string, Texture2D> textureCollectionARM;
 	ifs.open(path);
 	if (!ifs.is_open()) {
 		std::stringstream ss;
@@ -176,14 +178,43 @@ inline unordered_map<string, Material> LoadMtl(string path, unordered_map<string
 				tex.SetIfReleaseGpuArrayWhenDispose(false);
 				textureCollectionDiffuse[names.back()] = tex;
 			}
+			else if(tokens.at(0) == "map_Ns"){
+				auto tex=Texture2D::LoadImageFromFile(tokens.at(1));
+				tex.SetIfReleaseGpuArrayWhenDispose(false);
+				textureCollectionNormal[names.back()] = tex;
+			}
+			else if(tokens.at(0) == "map_Arm"){
+				auto tex=Texture2D::LoadImageFromFile(tokens.at(1));
+				tex.SetIfReleaseGpuArrayWhenDispose(false);
+				textureCollectionARM[names.back()] = tex;
+			}
 		}
 		Temp.MaterialType=MaterialType::MATERIAL_OBJ;
 		materials.push_back(Temp);
 	}
 	for (uint i = 0; i < names.size(); i++) {
 		if (textureCollectionDiffuse.find(names.at(i)) != textureCollectionDiffuse.end()) {
-			materials.at(i).BaseColorMap = textureCollectionDiffuse[names.at(i)].GetTextureView().textureIdentifier;
+			materials.at(i).BaseColorMap = textureCollectionDiffuse[names.at(i)].GetTextureView();
 			TextureResources[names.at(i)] = { "BaseColorMap",textureCollectionDiffuse[names.at(i)] };
+		}
+		else{
+			materials.at(i).BaseColorMap = {0,0,0,0};
+		}
+
+		if (textureCollectionNormal.find(names.at(i)) != textureCollectionNormal.end()) {
+			materials.at(i).NormalMap = textureCollectionNormal[names.at(i)].GetTextureView();
+			TextureResources[names.at(i)] = { "NormalMap",textureCollectionNormal[names.at(i)] };
+		}
+		else{
+			materials.at(i).NormalMap = {0,0,0,0};
+		}
+
+		if (textureCollectionARM.find(names.at(i)) != textureCollectionARM.end()) {
+			materials.at(i).ARMMap = textureCollectionARM[names.at(i)].GetTextureView();
+			TextureResources[names.at(i)] = { "ARMMap",textureCollectionARM[names.at(i)] };
+		}
+		else{
+			materials.at(i).ARMMap = {0,0,0,0};
 		}
 		mats.insert({ names.at(i),materials.at(i) });
 	}

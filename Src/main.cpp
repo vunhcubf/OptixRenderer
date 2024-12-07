@@ -29,7 +29,6 @@ static const char* fragmentShaderSource = "#version 330 core\n"
 "void main() {\n"
 "FragColor = texture(textureSampler, TexCoords);\n"
 "}\n\0";
-TextureManager* TextureManager::instance = nullptr;
 void main() {
 	try {
 		string CUDAIncludePath = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3/include";
@@ -101,10 +100,6 @@ void main() {
 		}
 		std::cout<<compilationOutput.str()<<std::endl;
 		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr");
-		//uint64 SkyBoxTex=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr"));
-		//uint64 SkyBoxTex2=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/citrus_orchard_road_2k.exr"));
-		//uint64 SkyBoxTex3=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/autumn_field_puresky_2k.exr"));
-		//uint64 SkyBoxStudio=TextureManager::Add(Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/studio_small_05_2k.exr"));
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
 		double2 MousePos;
@@ -172,8 +167,7 @@ void main() {
 		desc.shaders = { "CH_fetchHitInfo","CH_fetchHitInfo" };
 		scene.AddObjects(desc, name); }
 
-		//scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,TextureManager::QueryTex2DWithIndex(SkyBoxTex2)->GetTextureView().textureIdentifier});
-		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView().textureIdentifier });
+		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
 		scene.ConfigureRGSbt({ 1.0f,0.0f,1.0f });
 		scene.BuildScene();
 
@@ -522,8 +516,6 @@ void main() {
 		glDeleteTextures(1, &texture);
 		glfwDestroyWindow(window);
 		glfwTerminate();
-
-		TextureManager::DeleteInstance();
 		return;
 	}
 	catch (std::exception& e)

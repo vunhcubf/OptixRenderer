@@ -19,6 +19,8 @@
 #include <curand_kernel.h>
 #include <filesystem>
 #include <cstdlib>
+#include "cuda.h"
+#include "cuda_runtime.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC 
@@ -31,7 +33,12 @@ typedef float float32;
 typedef double float64;
 
 // 前向声明
-struct TextureView;
+struct TextureView{
+	uint width=0;
+	uint height=0;
+	unsigned char textureFormat=0;
+	cudaTextureObject_t textureIdentifier=0;
+};
 using std::string;
 using namespace::std;
 #define NO_TEXTURE_HERE 0xFFFFFFFF
@@ -91,7 +98,7 @@ struct RayGenData
 struct MissData {
     float3 BackgroundColor;
     float SkyBoxIntensity;
-    cudaTextureObject_t SkyBox;
+    TextureView SkyBox;
 };
 
 struct SbtDataStruct
@@ -101,9 +108,9 @@ struct SbtDataStruct
 //原理化BSDF
 struct Material
 {
-    cudaTextureObject_t NormalMap=NO_TEXTURE_HERE;
-    cudaTextureObject_t BaseColorMap= NO_TEXTURE_HERE;
-    cudaTextureObject_t ARMMap= NO_TEXTURE_HERE;
+    TextureView NormalMap;
+    TextureView BaseColorMap;
+    TextureView ARMMap;
     float3 BaseColor = make_float3(0.8,0.8,0.8);
     float3 Emission = make_float3(0, 0, 0);
     float Roughness=0.5f;
@@ -117,9 +124,9 @@ struct Material
 };
 
 inline void ResetMaterial(Material& mat) {
-    mat.NormalMap = NO_TEXTURE_HERE;
-    mat.BaseColorMap = NO_TEXTURE_HERE;
-    mat.ARMMap = NO_TEXTURE_HERE;
+    mat.NormalMap = {0,0,0,0};
+    mat.BaseColorMap = {0,0,0,0};
+    mat.ARMMap = {0,0,0,0};
     mat.BaseColor = make_float3(0.4, 0.4, 0.4);
     mat.Emission = make_float3(0, 0, 0);
     mat.Roughness = 0.5f;

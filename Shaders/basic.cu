@@ -31,8 +31,8 @@ extern "C" __global__ void __miss__sky()
 	MissData* data = (MissData*)optixGetSbtDataPointer();
 	float3 RayDir = optixGetWorldRayDirection();
 	float2 SkyBoxUv = GetSkyBoxUv(RayDir);
-	if (data->SkyBox != NO_TEXTURE_HERE) {
-		float4 skybox = SampleTexture2D<float4>(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
+	if (IsTextureViewValid(data->SkyBox)) {
+		float4 skybox = SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
 		Data.Radience=make_float3(skybox.x, skybox.y, skybox.z);
 		//Data.Radience = fminf(make_float3(skybox.x, skybox.y, skybox.z), make_float3(20.0f)) * data->SkyBoxIntensity;
 	}

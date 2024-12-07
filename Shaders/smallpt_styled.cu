@@ -33,16 +33,16 @@ extern "C" __global__ void __closesthit__diffuse()
 	float3 N = GetNormal();
 	float3 V = normalize(-optixGetWorldRayDirection());
 	float3 N_Geo = N;
-	if (ModelDataptr->MaterialData->BaseColorMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->BaseColorMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->BaseColorMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->BaseColorMap, uv.x, uv.y);
 		BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
 	}
 	else {
 		BaseColor = ModelDataptr->MaterialData->BaseColor;
 	}
 	BaseColor *= AO;
-	if (ModelDataptr->MaterialData->ARMMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->ARMMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->ARMMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->ARMMap, uv.x, uv.y);
 		Roughness = tmp.y;
 		Metallic = tmp.z;
 		AO = tmp.x;
@@ -54,8 +54,8 @@ extern "C" __global__ void __closesthit__diffuse()
 	Roughness = fmaxf(Roughness, 1e-3f);
 	float Transmission = ModelDataptr->MaterialData->Transmission;
 	float ior = ModelDataptr->MaterialData->Ior;
-	if (ModelDataptr->MaterialData->NormalMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->NormalMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->NormalMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->NormalMap, uv.x, uv.y);
 		NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
 		N = UseNormalMap(N, NormalMap, 1.0f);
 	}
@@ -135,16 +135,16 @@ extern "C" __global__ void __closesthit__glossy()
 	float3 N = GetNormal();
 	float3 V = normalize(-optixGetWorldRayDirection());
 	float3 N_Geo = N;
-	if (ModelDataptr->MaterialData->BaseColorMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->BaseColorMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->BaseColorMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->BaseColorMap, uv.x, uv.y);
 		BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
 	}
 	else {
 		BaseColor = ModelDataptr->MaterialData->BaseColor;
 	}
 	BaseColor *= AO;
-	if (ModelDataptr->MaterialData->ARMMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->ARMMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->ARMMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->ARMMap, uv.x, uv.y);
 		Roughness = tmp.y;
 		Metallic = tmp.z;
 		AO = tmp.x;
@@ -156,8 +156,8 @@ extern "C" __global__ void __closesthit__glossy()
 	Roughness = fmaxf(Roughness, 1e-3f);
 	float Transmission = ModelDataptr->MaterialData->Transmission;
 	float ior = ModelDataptr->MaterialData->Ior;
-	if (ModelDataptr->MaterialData->NormalMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->NormalMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->NormalMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->NormalMap, uv.x, uv.y);
 		NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
 		N = UseNormalMap(N, NormalMap, 1.0f);
 	}
@@ -277,16 +277,16 @@ extern "C" __global__ void __closesthit__glass()
 	float3 N = GetNormal();
 	float3 V = normalize(-optixGetWorldRayDirection());
 	float3 N_Geo = N;
-	if (ModelDataptr->MaterialData->BaseColorMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->BaseColorMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->BaseColorMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->BaseColorMap, uv.x, uv.y);
 		BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
 	}
 	else {
 		BaseColor = ModelDataptr->MaterialData->BaseColor;
 	}
 	BaseColor *= AO;
-	if (ModelDataptr->MaterialData->ARMMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->ARMMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->ARMMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->ARMMap, uv.x, uv.y);
 		Roughness = tmp.y;
 		Metallic = tmp.z;
 		AO = tmp.x;
@@ -299,8 +299,8 @@ extern "C" __global__ void __closesthit__glass()
 	float Transmission = ModelDataptr->MaterialData->Transmission;
 	float ior = ModelDataptr->MaterialData->Ior;
 	ior = fmaxf(ior, 1.0001f);
-	if (ModelDataptr->MaterialData->NormalMap != NO_TEXTURE_HERE) {
-		float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->NormalMap, uv.x, uv.y);
+	if (IsTextureViewValid(ModelDataptr->MaterialData->NormalMap)) {
+		float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->NormalMap, uv.x, uv.y);
 		NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
 		N = UseNormalMap(N, NormalMap, 1.0f);
 	}

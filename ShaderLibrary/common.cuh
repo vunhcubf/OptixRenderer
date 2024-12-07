@@ -24,11 +24,14 @@ typedef long long int64;
 typedef float float32;
 typedef double float64;
 struct TextureView{
-	uint width;
-	uint height;
-	unsigned char textureFormat;
-	cudaTextureObject_t textureIdentifier;
+	uint width=0;
+	uint height=0;
+	unsigned char textureFormat=0;
+	cudaTextureObject_t textureIdentifier=0;
 };
+static __device__ bool IsTextureViewValid(TextureView view){
+	return view.width!=0 && view.height!=0;
+}
 const float goldenRatioConjugate = 0.061803398875f;
 enum SurfaceType : uint{
 	Light,
@@ -162,7 +165,7 @@ struct MissData {
     float3 BackgroundColor;
     float SkyBoxIntensity;
     //uint64 skyBoxTextureIdentifier;
-	cudaTextureObject_t SkyBox;
+	TextureView SkyBox;
 };
 struct BlueNoiseMapBuffer{
     unsigned char* Data;
@@ -230,11 +233,12 @@ struct LaunchParameters {
 };
 
 //原理化BSDF
+// 现在使用texture view来描述纹理，但是不想改材质结构体的定义，把uint64当作指针吧
 struct Material
 {
-    uint64 NormalMap=NO_TEXTURE_HERE;
-    uint64 BaseColorMap= NO_TEXTURE_HERE;
-    uint64 ARMMap= NO_TEXTURE_HERE;
+    TextureView NormalMap;
+    TextureView BaseColorMap;
+    TextureView ARMMap;
     float3 BaseColor = make_float3(0.8,0.8,0.8);
     float3 Emission = make_float3(0, 0, 0);
     float Roughness=0.5f;
@@ -288,14 +292,35 @@ __device__ inline uint2 BlueNoiseMapBuffer::GetLoopSamplePixelId(){
 }
 #define SAMPLE_BLUENOISE_4D(x) RayTracingGlobalParams.BlueNoiseBuffer->Sample<4>(make_uint2(optixGetLaunchIndex().x,optixGetLaunchIndex().y),&x)
 template<typename T>
-static __forceinline__ __device__ T SampleTexture2D(uint64 tex, float u, float v) {
-	return tex2D<T>(tex, u, v);
+static __forceinline__ __device__ T SampleTexture2DWithCompliationSpecification(TextureView tex, float u, float v) {
+	return tex2D<T>(tex.textureIdentifier, u, v);
 }
-template<typename T>
-static __forceinline__ __device__ float3 SampleTexture2DColor(uint64 tex, float u, float v) {
-	float4 tmp= tex2D<T>(tex, u, v);
-	float3 color = make_float3(tmp.x, tmp.y, tmp.z);
-	return color;
+static __forceinline__ __device__ float4 SampleTexture2DRuntimeSpecific(TextureView tex, float u, float v){
+	if(tex.textureFormat==TEXTURE_FORMAT_UCHAR1){
+		uchar1 r=SampleTexture2DWithCompliationSpecification<uchar1>(tex,u,v);
+		return make_float4(r.x/255.0, 0,0,0);
+	}
+	else if(tex.textureFormat==TEXTURE_FORMAT_UCHAR2){
+		uchar2 r=SampleTexture2DWithCompliationSpecification<uchar2>(tex,u,v);
+		return make_float4(r.x/255.0, r.y/255.0 ,0,0);
+	}
+	else if(tex.textureFormat==TEXTURE_FORMAT_UCHAR4){
+		uchar4 r=SampleTexture2DWithCompliationSpecification<uchar4>(tex,u,v);
+		return make_float4(r.x/255.0, r.y/255.0 ,r.z/255.0, r.w/255.0);
+	}
+
+	else if(tex.textureFormat==TEXTURE_FORMAT_FLOAT1){
+		float1 r=SampleTexture2DWithCompliationSpecification<float1>(tex,u,v);
+		return make_float4(r.x, 0,0,0);
+	}
+	else if(tex.textureFormat==TEXTURE_FORMAT_FLOAT2){
+		float2 r=SampleTexture2DWithCompliationSpecification<float2>(tex,u,v);
+		return make_float4(r.x, r.y ,0,0);
+	}
+	else if(tex.textureFormat==TEXTURE_FORMAT_FLOAT4){
+		return SampleTexture2DWithCompliationSpecification<float4>(tex,u,v);
+	}
+	return make_float4(1,1,1,1);
 }
 static __forceinline__ __device__ float pow2(float a) {
 	return a * a;
@@ -305,8 +330,15 @@ static __forceinline__ __device__ float3 sqrt(float3 a) {
 }
 static __forceinline__ __device__ float Pow4(float a) {
 	return a * a * a * a;
-}static __forceinline__ __device__ float3 abs(float3 a) {
+}
+static __forceinline__ __device__ float2 abs(float2 a) {
+	return make_float2(abs(a.x), abs(a.y));
+}
+static __forceinline__ __device__ float3 abs(float3 a) {
 	return make_float3(abs(a.x), abs(a.y), abs(a.z));
+}
+static __forceinline__ __device__ float4 abs(float4 a) {
+	return make_float4(abs(a.x), abs(a.y), abs(a.z),abs(a.w));
 }
 static __forceinline__ __device__ float squared_length(float3 vec) {
 	return dot(vec, vec);
@@ -652,18 +684,16 @@ struct SurfaceData{
 		float3& v3 = VerticesPtr[3 * primIndex + 2];
 		GeometryNormal = normalize(cross(v1 - v2, v1 - v3));
 		Position=v1 * Centrics.x + v2 * Centrics.y + v3 * Centrics.z;
-		if (ModelDataptr->MaterialData->BaseColorMap != NO_TEXTURE_HERE) {
-			//float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
-			//BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
-			uchar4 tmp = SampleTexture2D<uchar4>(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
-			BaseColor = make_float3(tmp.x/255.0, tmp.y/255.0, tmp.z/255.0);
+		if (IsTextureViewValid(ModelDataptr->MaterialData->BaseColorMap)) {
+			float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
+			BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
 		}
 		else {
 			BaseColor = ModelDataptr->MaterialData->BaseColor;
 		}
 		
-		if (ModelDataptr->MaterialData->ARMMap != NO_TEXTURE_HERE) {
-			float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->ARMMap, TexCoord.x, TexCoord.y);
+		if (IsTextureViewValid(ModelDataptr->MaterialData->ARMMap)) {
+			float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->ARMMap, TexCoord.x, TexCoord.y);
 			Roughness = tmp.y;
 			Metallic = tmp.z;
 			AO = tmp.x;
@@ -678,8 +708,8 @@ struct SurfaceData{
 		ior = ModelDataptr->MaterialData->Ior;
 		ior = fmaxf(ior, 1.0001f);
 		// 应用法线贴图
-		if (ModelDataptr->MaterialData->NormalMap != NO_TEXTURE_HERE) {
-			float4 tmp = SampleTexture2D<float4>(ModelDataptr->MaterialData->NormalMap, TexCoord.x, TexCoord.y);
+		if (IsTextureViewValid(ModelDataptr->MaterialData->NormalMap)) {
+			float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->NormalMap, TexCoord.x, TexCoord.y);
 			NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
 			Normal = UseNormalMap(Normal, NormalMap, 1.0f);
 		}

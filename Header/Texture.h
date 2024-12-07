@@ -3,8 +3,6 @@
 #include "common.h"
 #include <ImfRgbaFile.h>
 #include <ImfArray.h>
-#include "cuda.h"
-#include "cuda_runtime.h"
 #include <memory>
 
 #define TEXTURE_FORMAT_UCHAR1 0
@@ -48,13 +46,6 @@ static inline unsigned char* ReadLDRImage(const char* path,uint& width,uint& hei
 	channel=c;
 	return hostdata;
 } 
-
-struct TextureView{
-	uint width;
-	uint height;
-	unsigned char textureFormat;
-	cudaTextureObject_t textureIdentifier;
-};
 
 class Texture2D {
 private:
@@ -199,52 +190,3 @@ private:
 		textureView={width,height,textureFormat,texObj};
 	}
 };
-
-class TextureManager {
-	// 用来管理所有的材质
-	// 采取单例模式
-private:
-	//vector<TextureView> textureDiscriptorsRange;
-	vector<Texture2D*> textureObjects;
-	uint64 NumTextures = 0;
-public:
-	static TextureManager* instance;
-	//TextureManager(const TextureManager&) = delete;
-	TextureManager& operator=(const TextureManager&) = delete;
-	static inline TextureManager* GetInstance() {
-		if (instance == nullptr) {
-			instance = new TextureManager();
-		}
-		return instance;
-	}
-	static inline void DeleteInstance() {
-		if (instance != nullptr) {
-			delete instance;
-		}
-	}
-	//static inline TextureView* GetData() {
-	//	auto ins = GetInstance();
-	//	return ins->textureDiscriptorsRange.data();
-	//}
-	static inline Texture2D* QueryTex2DWithIndex(uint64 index) {
-		auto ins = GetInstance();
-		return ins->textureObjects[index];
-	}
-	//static inline size_t GetSize() {
-	//	auto ins = GetInstance();
-	//	return ins->textureDiscriptorsRange.size();
-	//}
-	static inline uint64 Add(Texture2D* textureObject) {
-		auto instance = GetInstance();
-		//instance->textureDiscriptorsRange.push_back(textureObject.GetTextureView());
-		instance->textureObjects.push_back(textureObject);
-		return instance->NumTextures++;
-	}
-};
-
-
-
-
-
-
-
