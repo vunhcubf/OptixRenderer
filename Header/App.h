@@ -145,4 +145,5 @@ public:
 	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height);
 };
 
-
+void BeforeRendering();
+void Update();

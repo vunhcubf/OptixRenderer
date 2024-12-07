@@ -397,4 +397,9 @@ MyCamera::MyCamera(float3 Pos, float2 Rotate) {
 	UpDirection = CrossProduct(RightDirection, ForwardDirection);
 }
 
+void BeforeRendering(){
 
+}
+void Update(){
+	
+}
