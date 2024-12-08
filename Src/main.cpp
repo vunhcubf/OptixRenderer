@@ -100,6 +100,7 @@ void main() {
 		}
 		std::cout<<compilationOutput.str()<<std::endl;
 		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr");
+		TextureManager::GetInstance().Add("skybox",skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
 		double2 MousePos;
@@ -125,12 +126,12 @@ void main() {
 		scene.AddMissShader("__miss__fetchMissInfo", "module_disney_principled");
 		scene.AddRayGenerationShader("__raygen__principled_bsdf", "module_disney_principled");
 
-		scene.AddHitShader("CH_diffuse", "module_smallpt_styled", "__closesthit__diffuse", "", "");
-		scene.AddHitShader("CH_glossy", "module_smallpt_styled", "__closesthit__glossy", "", "");
-		scene.AddHitShader("CH_glass", "module_smallpt_styled", "__closesthit__glass", "", "");
-		scene.AddHitShader("CH_occluded", "module_smallpt_styled", "__closesthit__occluded", "", "");
-		scene.AddHitShader("CH_principled_bsdf", "module_disney_principled", "__closesthit__principled_bsdf", "", "");
-		scene.AddHitShader("CH_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
+		scene.AddHitShader("HitGroup_diffuse", "module_smallpt_styled", "__closesthit__diffuse", "", "");
+		scene.AddHitShader("HitGroup_glossy", "module_smallpt_styled", "__closesthit__glossy", "", "");
+		scene.AddHitShader("HitGroup_glass", "module_smallpt_styled", "__closesthit__glass", "", "");
+		scene.AddHitShader("HitGroup_occluded", "module_smallpt_styled", "__closesthit__occluded", "", "");
+		scene.AddHitShader("HitGroup_principled_bsdf", "module_disney_principled", "__closesthit__principled_bsdf", "", "");
+		scene.AddHitShader("HitGroup_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
 
 		{
 			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
@@ -141,7 +142,7 @@ void main() {
 				ObjectDesc desc;
 				desc.mesh = mesh;
 				desc.mat = mat;
-				desc.shaders = { "CH_fetchHitInfo" };
+				desc.shaders = { "HitGroup_fetchHitInfo" };
 				scene.AddObjects(desc, name);
 			}
 		}
@@ -154,7 +155,7 @@ void main() {
 				ObjectDesc desc;
 				desc.mesh = mesh;
 				desc.mat = mat;
-				desc.shaders = { "CH_fetchHitInfo" };
+				desc.shaders = { "HitGroup_fetchHitInfo" };
 				scene.AddObjects(desc, name);
 			}
 		}
@@ -162,7 +163,7 @@ void main() {
 		ObjectDesc desc;
 		desc.mesh = Mesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
 		desc.mat.MaterialType = MATERIAL_AREALIGHT;
-		desc.shaders = { "CH_fetchHitInfo" };
+		desc.shaders = { "HitGroup_fetchHitInfo" };
 		scene.AddObjects(desc, name); }
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
