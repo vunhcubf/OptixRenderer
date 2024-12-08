@@ -36,7 +36,8 @@ const float goldenRatioConjugate = 0.061803398875f;
 enum SurfaceType : uint{
 	Light,
 	Opaque,
-	Miss
+	Miss,
+	ProceduralObject
 };
 __device__ __forceinline__ uint3 operator>>(uint3 x,uint i){
 	return make_uint3(x.x>>i,x.y>>i,x.z>>i);

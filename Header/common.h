@@ -32,7 +32,12 @@ typedef long long int64;
 typedef float float32;
 typedef double float64;
 
-// Ç°ÏòÉùÃ÷
+struct ProceduralGeometryMaterialBuffer {
+    float4 E1;
+    float4 E2;
+    float4 E3;
+};
+
 struct TextureView{
 	uint width=0;
 	uint height=0;

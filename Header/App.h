@@ -82,6 +82,21 @@ struct Object {
 
 	vector<UniquePtrDevice> SbtRecordsData;
 };
+// 编写程序化几何体的类
+// 用以支持灯光系统
+// scene manager中add object方法负责构建GAS和创建一条SBT Record
+// scene manager中build scene方法负责构建TAS和着色器绑定表
+// 创建Procedural object类
+// 物体类包含模型数据，模型数据包含几何数据和材质数据，还要记录Record的内容
+struct ProceduralObject{
+	OptixTraversableHandle GASHandle;
+	UniquePtrDevice GASOutputBuffer;
+	UniquePtrDevice AabbBuffer;
+	// 程序化几何体不存在几何数据，只有材质数据需要上传
+	UniquePtrDevice MaterialBuffer;
+	vector<UniquePtrDevice> SbtRecordsData;
+};
+
 struct RayTracingConfig {
 	OptixPipelineCompileOptions pipelineCompileOptions;
 	uint NumSbtRecords;
@@ -92,7 +107,7 @@ struct RayTracingConfig {
 typedef unordered_map<string, OptixProgramGroup> ShaderManager;
 typedef unordered_map<string, OptixModule> Modules;
 typedef unordered_map<string, Object> Objects;
-
+typedef unordered_map<string, ProceduralObject> ProceduralObjects;
 //封装场景管理类，管理资源，渲染初始化和每帧的调用
 class SceneManager {
 private:
@@ -134,12 +149,17 @@ private:
 	UniquePtrDevice SbtRecordHit;
 	UniquePtrDevice SbtRecordException;
 	OptixShaderBindingTable Sbt = {};
+	// 再加上程序化几何体
+	ProceduralObjects proceduralObjects;
 public:
 	OptixTraversableHandle GetTraversableHandle();
 	void AddObjects(ObjectDesc desc,string Name);
 	void ConfigureMissSbt(MissData Data);
 	void ConfigureRGSbt(RayGenData Data);
 	void BuildScene();
+
+	void AddProceduralObject(string name, OptixAabb aabb, ProceduralGeometryMaterialBuffer mat,vector<string> shaders);
+	void BuildSceneWithProceduralGeometrySupported();
 private:
 	UniquePtrDevice LaunchParameter;
 public:

@@ -100,7 +100,7 @@ void SceneManager::AddObjects(ObjectDesc desc, string Name)
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&vertexBuffer), mesh.GetVerticesCount() * sizeof(float3)));
 	CUDA_CHECK(cudaMemcpy((void*)vertexBuffer, mesh.GetVerticesPtr(), mesh.GetVerticesCount() * sizeof(float3), cudaMemcpyHostToDevice));
 	//构建设置
-	const uint32_t TriangleInputFlags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
+	vector<uint> TriangleInputFlags(NumSbtRecords, OPTIX_GEOMETRY_FLAG_NONE);
 	OptixBuildInput TriangleInput = {};
 	TriangleInput.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
 	TriangleInput.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
@@ -108,7 +108,7 @@ void SceneManager::AddObjects(ObjectDesc desc, string Name)
 	TriangleInput.triangleArray.numVertices = mesh.GetVerticesCount();
 	TriangleInput.triangleArray.vertexBuffers = &vertexBuffer;
 
-	TriangleInput.triangleArray.flags = TriangleInputFlags;
+	TriangleInput.triangleArray.flags = TriangleInputFlags.data();
 	TriangleInput.triangleArray.numSbtRecords = NumSbtRecords;
 	//加速结构大小
 	OptixAccelBufferSizes GASBufferSize;
@@ -203,9 +203,86 @@ void SceneManager::AddObjects(ObjectDesc desc, string Name)
 	for (uint i = 0; i < NumSbtRecords; i++) {
 		cout << "SBT记录地址" << i << ": " << objects.at(Name).SbtRecordsData.at(i).GetPtr() << endl;
 	}
-
 }
 
+void SceneManager::AddProceduralObject(string name, OptixAabb aabb, ProceduralGeometryMaterialBuffer mat,vector<string> shaders){
+	// GAS句柄
+	OptixTraversableHandle Handle;
+	UniquePtrDevice GASOutputBuffer;
+	OptixAccelBuildOptions AccelBuildOpts = {};
+	AccelBuildOpts.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;//构建选项，先设置为无，不压缩
+	AccelBuildOpts.operation = OPTIX_BUILD_OPERATION_BUILD;
+	vector<uint> ProceduralGeometryInputFlags(NumSbtRecords, OPTIX_GEOMETRY_FLAG_NONE);
+	OptixBuildInput ProceduralGeometryInput={};
+	ProceduralGeometryInput.type=OPTIX_BUILD_INPUT_TYPE_CUSTOM_PRIMITIVES;
+	//上传AABB数据
+	CUdeviceptr AabbBuffer;
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&AabbBuffer), sizeof(OptixAabb)));
+	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(AabbBuffer),&aabb,sizeof(OptixAabb),cudaMemcpyHostToDevice));
+	ProceduralGeometryInput.customPrimitiveArray.aabbBuffers = &AabbBuffer;
+	ProceduralGeometryInput.customPrimitiveArray.numPrimitives = 1;
+	ProceduralGeometryInput.customPrimitiveArray.strideInBytes = sizeof(OptixAabb);
+	ProceduralGeometryInput.customPrimitiveArray.flags = ProceduralGeometryInputFlags.data();
+	ProceduralGeometryInput.customPrimitiveArray.numSbtRecords = NumSbtRecords;
+	//加速结构大小
+	OptixAccelBufferSizes GASBufferSize;
+	OPTIX_CHECK(optixAccelComputeMemoryUsage(
+		Context,
+		&AccelBuildOpts,
+		&ProceduralGeometryInput,
+		1, // Number of build inputs
+		&GASBufferSize
+	));
+	//需要ScratchBuffer
+	CUdeviceptr ScratchBuffer;
+	CUDA_CHECK(cudaMalloc(
+		reinterpret_cast<void**>(&ScratchBuffer),
+		GASBufferSize.tempSizeInBytes
+	));
+	CUDA_CHECK(cudaMalloc(
+		GASOutputBuffer.GetAddressOfPtr(),
+		GASBufferSize.outputSizeInBytes
+	));
+	OPTIX_CHECK(optixAccelBuild(
+		Context,
+		0,                  // CUDA stream
+		&AccelBuildOpts,
+		&ProceduralGeometryInput,
+		1,                  // num build inputs
+		ScratchBuffer,
+		GASBufferSize.tempSizeInBytes,
+		(CUdeviceptr)GASOutputBuffer.GetPtr(),
+		GASBufferSize.outputSizeInBytes,
+		&Handle,
+		nullptr,            // emitted property list
+		0                   // num emitted properties
+	));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(ScratchBuffer)));
+
+	proceduralObjects[name].GASHandle = Handle;
+	proceduralObjects[name].GASOutputBuffer = GASOutputBuffer;
+	proceduralObjects[name].AabbBuffer = reinterpret_cast<void*>(AabbBuffer);
+
+	// 处理shader，材质数据和SBTRecord
+	// 每个sbt的数据结构不变，但是指针换成材质缓冲的指针
+	CUdeviceptr MaterialBuffer;
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&MaterialBuffer),sizeof(ProceduralGeometryMaterialBuffer)));
+	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(MaterialBuffer), &mat, sizeof(ProceduralGeometryMaterialBuffer), cudaMemcpyHostToDevice));
+	proceduralObjects[name].MaterialBuffer = reinterpret_cast<void*>(MaterialBuffer);
+	// 处理sbt record
+	proceduralObjects[name].SbtRecordsData = vector<UniquePtrDevice>(NumSbtRecords);
+	//设置sbts
+	for (uint i = 0; i < NumSbtRecords; i++) {
+		string& item = shaders.at(std::min(i, NumSbtRecords));
+		proceduralObjects[name].SbtRecordsData.at(i) = (void*)CreateSbtRecord<SbtDataStruct>(shaderManager.at(item), { MaterialBuffer });
+	}
+	cout << "\n导入程序化几何体:" << name << endl;
+	cout << "材质缓冲地址: " << proceduralObjects.at(name).MaterialBuffer.GetPtr() << endl;
+	cout << "GAS句柄: " << proceduralObjects.at(name).GASHandle << endl;
+	for (uint i = 0; i < NumSbtRecords; i++) {
+		cout << "SBT记录地址" << i << ": " << proceduralObjects.at(name).SbtRecordsData.at(i).GetPtr() << endl;
+	}
+}
 void SceneManager::ConfigureMissSbt(MissData Data)
 {
 	SbtRecordMiss = (void*)CreateSbtRecord<MissData>(ShaderMiss, Data);
@@ -312,6 +389,123 @@ void SceneManager::BuildScene()
 	shaders_array.push_back(this->ShaderMiss);
 	shaders_array.push_back(this->ShaderRG);
 	pipeLine = CreatePipeline(Context, pipelineCompileOptions, shaders_array,MaxRayRecursiveDepth,MaxSceneTraversalDepth);
+}
+void SceneManager::BuildSceneWithProceduralGeometrySupported() {
+	cout << "\nCall Build Scene with procedural geometry supported" << endl;
+	uint NumObjs = objects.size();
+	// 这次加上程序化几何体
+	uint NumProceduralGeometry = proceduralObjects.size();
+	vector<OptixInstance> instances(NumObjs+ NumProceduralGeometry);
+	float TransformIdentity[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
+	ZeroMemory(instances.data(), sizeof(OptixInstance) * (NumObjs+ NumProceduralGeometry));
+
+	//任务是创建TAS和设置SBT
+	CUDA_CHECK(cudaMalloc(SbtRecordHit.GetAddressOfPtr(), (NumObjs + NumProceduralGeometry) * NumSbtRecords * sizeof(SbtRecord<SbtDataStruct>)));
+	uint Counter = 0;
+	cout << "SBT记录大小: " << sizeof(SbtRecord<SbtDataStruct>) << endl;
+	for (auto& item : objects) {
+		Object& obj = item.second;
+		const string& obj_name = item.first;
+
+		instances[Counter].instanceId = Counter;
+		instances[Counter].sbtOffset = Counter * NumSbtRecords;
+		instances[Counter].visibilityMask = 255;
+		instances[Counter].traversableHandle = obj.GASHandle;
+		for (int i = 0; i < 12; i++) {
+			instances[Counter].transform[i] = TransformIdentity[i];
+		}
+		for (uint i = 0; i < NumSbtRecords; i++) {
+			SbtRecord<SbtDataStruct>* OffsetAddress = (SbtRecord<SbtDataStruct>*)SbtRecordHit.GetPtr();
+			OffsetAddress += Counter * NumSbtRecords + i;
+			cout << "偏移量: " << OffsetAddress << endl;
+			CUDA_CHECK(cudaMemcpy(OffsetAddress, obj.SbtRecordsData[i].GetPtr(), sizeof(SbtRecord<SbtDataStruct>), cudaMemcpyDeviceToDevice));
+		}
+		Counter++;
+	}
+	for (auto& item : proceduralObjects) {
+		ProceduralObject& obj = item.second;
+		const string& obj_name = item.first;
+		instances[Counter].instanceId = Counter;
+		instances[Counter].sbtOffset = Counter * NumSbtRecords;
+		instances[Counter].visibilityMask = 255;
+		instances[Counter].traversableHandle = obj.GASHandle;
+		for (int i = 0; i < 12; i++) {
+			instances[Counter].transform[i] = TransformIdentity[i];
+		}
+		for (uint i = 0; i < NumSbtRecords; i++) {
+			SbtRecord<SbtDataStruct>* OffsetAddress = (SbtRecord<SbtDataStruct>*)SbtRecordHit.GetPtr();
+			OffsetAddress += Counter * NumSbtRecords + i;
+			cout << "程序化几何体SBT偏移量: " << OffsetAddress << endl;
+			CUDA_CHECK(cudaMemcpy(OffsetAddress, obj.SbtRecordsData[i].GetPtr(), sizeof(SbtRecord<SbtDataStruct>), cudaMemcpyDeviceToDevice));
+		}
+		Counter++;
+	}
+
+	OptixInstance* InstancesDevice;
+	CUDA_CHECK(cudaMalloc(&InstancesDevice, sizeof(OptixInstance) * (NumObjs + NumProceduralGeometry)));
+	CUDA_CHECK(cudaMemcpy(InstancesDevice, instances.data(), sizeof(OptixInstance) * (NumObjs + NumProceduralGeometry), cudaMemcpyHostToDevice));
+	OptixAccelBuildOptions accelOptions = {};
+	accelOptions.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;
+	accelOptions.operation = OPTIX_BUILD_OPERATION_BUILD;
+
+	OptixBuildInput InstanceInput = {};
+	InstanceInput.type = OPTIX_BUILD_INPUT_TYPE_INSTANCES;
+	InstanceInput.instanceArray.instances = (CUdeviceptr)InstancesDevice;
+	InstanceInput.instanceArray.numInstances = NumObjs + NumProceduralGeometry;
+
+	OptixAccelBufferSizes IASBufferSize;
+	OPTIX_CHECK(optixAccelComputeMemoryUsage(
+		Context,
+		&accelOptions,
+		&InstanceInput,
+		1, // Number of build inputs
+		&IASBufferSize
+	));
+	//需要ScratchBuffer
+	CUdeviceptr ScratchBuffer;
+	CUDA_CHECK(cudaMalloc(
+		reinterpret_cast<void**>(&ScratchBuffer),
+		IASBufferSize.tempSizeInBytes
+	));
+	CUDA_CHECK(cudaMalloc(
+		this->IASOutputBuffer.GetAddressOfPtr(),
+		IASBufferSize.outputSizeInBytes
+	));
+	OPTIX_CHECK(optixAccelBuild(
+		Context,
+		0,                  // CUDA stream
+		&accelOptions,
+		&InstanceInput,
+		1,                  // num build inputs
+		ScratchBuffer,
+		IASBufferSize.tempSizeInBytes,
+		(CUdeviceptr)this->IASOutputBuffer.GetPtr(),
+		IASBufferSize.outputSizeInBytes,
+		&this->TASHandle,
+		nullptr,            // emitted property list
+		0                   // num emitted properties
+	));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(ScratchBuffer)));
+	cout << "TAS句柄: " << TASHandle << endl;
+	SbtRecordException = (void*)CreateSbtRecord<CUdeviceptr>(ShaderRG, 0);
+	OptixShaderBindingTable& ShaderBindingTable = Sbt;
+	ShaderBindingTable.raygenRecord = (CUdeviceptr)SbtRecordRG.GetPtr();;
+	ShaderBindingTable.missRecordBase = (CUdeviceptr)SbtRecordMiss.GetPtr();
+	ShaderBindingTable.missRecordStrideInBytes = sizeof(SbtRecord<MissData>);
+	ShaderBindingTable.missRecordCount = 1;
+	ShaderBindingTable.hitgroupRecordBase = (CUdeviceptr)SbtRecordHit.GetPtr();
+	ShaderBindingTable.hitgroupRecordStrideInBytes = sizeof(SbtRecord<SbtDataStruct>);
+	ShaderBindingTable.hitgroupRecordCount = (NumObjs + NumProceduralGeometry) * NumSbtRecords;
+	ShaderBindingTable.exceptionRecord = (CUdeviceptr)SbtRecordException.GetPtr();
+
+	vector<OptixProgramGroup> shaders_array;
+	shaders_array.reserve(shaderManager.size() + 2);
+	for (auto& item : shaderManager) {
+		shaders_array.push_back(item.second);
+	}
+	shaders_array.push_back(this->ShaderMiss);
+	shaders_array.push_back(this->ShaderRG);
+	pipeLine = CreatePipeline(Context, pipelineCompileOptions, shaders_array, MaxRayRecursiveDepth, MaxSceneTraversalDepth);
 }
 
 void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParametersDesc LParamsDesc, uint Width, uint Height, uint Spp)

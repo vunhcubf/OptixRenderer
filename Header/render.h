@@ -27,23 +27,6 @@ OptixTraversableHandle CreateIAS(
 
 OptixDeviceContext CreateContext();
 
-//typedef enum OptixTraversableGraphFlags
-//{
-//	///  Used to signal that any traversable graphs is valid.
-//	///  This flag is mutually exclusive with all other flags.
-//	OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY = 0,
-//
-//	///  Used to signal that a traversable graph of a single Geometry Acceleration
-//	///  Structure (GAS) without any transforms is valid. This flag may be combined with
-//	///  other flags except for OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY.
-//	OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS = 1u << 0,
-//
-//	///  Used to signal that a traversable graph of a single Instance Acceleration
-//	///  Structure (IAS) directly connected to Geometry Acceleration Structure (GAS)
-//	///  traversables without transform traversables in between is valid.  This flag may
-//	///  be combined with other flags except for OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY.
-//	OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING = 1u << 1,
-//} OptixTraversableGraphFlags;
 OptixPipelineCompileOptions CreatePipelineCompileOptions(
 	uint TraversableGraphFlags, 
 	int NumPayloadValue, 

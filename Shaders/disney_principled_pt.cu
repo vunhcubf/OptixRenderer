@@ -334,6 +334,10 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		}
 		return;
 	}
+	else if(hitInfo.surfaceType==ProceduralObject){
+		RayTracingGlobalParams.IndirectOutputBuffer[pixel_id]=make_float3(1,0,1);
+		return;
+	}
 	else if(hitInfo.surfaceType==Light){
 		RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = RayTracingGlobalParams.areaLight.Color;
 		return;
@@ -419,5 +423,13 @@ extern "C" __global__ void __miss__fetchMissInfo()
 }
 
 extern "C" __global__ void __intersection__test(){
-
+	optixReportIntersection(optixGetRayTmin()+1e-3f,0);
+}
+extern "C" __global__ void __closesthit__test(){
+	HitInfo hitInfo;
+	hitInfo.PrimitiveID=optixGetPrimitiveIndex();
+	hitInfo.SbtDataPtr=((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;// ÉñÃØµÄ²âÊÔ´úÂë
+	hitInfo.TriangleCentroidCoord=optixGetTriangleBarycentrics();
+	hitInfo.surfaceType=SurfaceType::ProceduralObject;
+	SetPayLoad(hitInfo);
 }

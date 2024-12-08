@@ -132,7 +132,8 @@ void main() {
 		scene.AddHitShader("HitGroup_occluded", "module_smallpt_styled", "__closesthit__occluded", "", "");
 		scene.AddHitShader("HitGroup_principled_bsdf", "module_disney_principled", "__closesthit__principled_bsdf", "", "");
 		scene.AddHitShader("HitGroup_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
-
+		
+		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_test", "module_disney_principled", "__closesthit__test", "", "__intersection__test");
 		{
 			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
 			for (const auto& one : cornel) {
@@ -159,16 +160,30 @@ void main() {
 				scene.AddObjects(desc, name);
 			}
 		}
-		{string name = "area_light";
-		ObjectDesc desc;
-		desc.mesh = Mesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
-		desc.mat.MaterialType = MATERIAL_AREALIGHT;
-		desc.shaders = { "HitGroup_fetchHitInfo" };
-		scene.AddObjects(desc, name); }
+		{
+			string name = "area_light";
+			ObjectDesc desc;
+			desc.mesh = Mesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
+			desc.mat.MaterialType = MATERIAL_AREALIGHT;
+			desc.shaders = { "HitGroup_fetchHitInfo" };
+			scene.AddObjects(desc, name); 
+		}
+		{
+			string name = "test_geo";
+			OptixAabb aabb;
+			aabb.maxX = 1;
+			aabb.maxY = 1;
+			aabb.maxZ = 1;
+			aabb.minX = 0;
+			aabb.minY = 0;
+			aabb.minZ = 0;
+			ProceduralGeometryMaterialBuffer buffer;
+			scene.AddProceduralObject(name, aabb, buffer, { "HitGroup_fetchHitInfo_proceduralgeo_test" });
+		}
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
 		scene.ConfigureRGSbt({ 1.0f,0.0f,1.0f });
-		scene.BuildScene();
+		scene.BuildSceneWithProceduralGeometrySupported();
 
 		MyCamera camera(make_float3(0, -5.0f, 0), make_float2(M_PI * 0.5, M_PI / 2));
 
