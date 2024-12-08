@@ -108,7 +108,7 @@ void main() {
 		SceneManager scene;
 		scene.WarmUp();
 		RayTracingConfig conf;
-		conf.NumSbtRecords = 2;
+		conf.NumSbtRecords = 1;
 		conf.MaxRayRecursiveDepth = 10;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
@@ -133,8 +133,7 @@ void main() {
 		scene.AddHitShader("CH_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
 
 		{
-			unordered_map<string, tuple<string, Texture2D>> TextureResourcesForThis;
-			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj", TextureResourcesForThis);
+			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
 			for (const auto& one : cornel) {
 				const string& name = one.first;
 				const Mesh& mesh = one.second.first;
@@ -142,13 +141,12 @@ void main() {
 				ObjectDesc desc;
 				desc.mesh = mesh;
 				desc.mat = mat;
-				desc.shaders = { "CH_fetchHitInfo","CH_fetchHitInfo" };
+				desc.shaders = { "CH_fetchHitInfo" };
 				scene.AddObjects(desc, name);
 			}
 		}
 		{
-			unordered_map<string, tuple<string, Texture2D>> TextureResourcesForThis;
-			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj", TextureResourcesForThis);
+			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj");
 			for (const auto& one : sponza) {
 				const string& name = one.first;
 				const Mesh& mesh = one.second.first;
@@ -156,7 +154,7 @@ void main() {
 				ObjectDesc desc;
 				desc.mesh = mesh;
 				desc.mat = mat;
-				desc.shaders = { "CH_fetchHitInfo","CH_fetchHitInfo" };
+				desc.shaders = { "CH_fetchHitInfo" };
 				scene.AddObjects(desc, name);
 			}
 		}
@@ -164,7 +162,7 @@ void main() {
 		ObjectDesc desc;
 		desc.mesh = Mesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
 		desc.mat.MaterialType = MATERIAL_AREALIGHT;
-		desc.shaders = { "CH_fetchHitInfo","CH_fetchHitInfo" };
+		desc.shaders = { "CH_fetchHitInfo" };
 		scene.AddObjects(desc, name); }
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
@@ -222,10 +220,6 @@ void main() {
 			CUDA_CHECK(cudaMalloc(&RandomGeneratorPixelOffset,sizeof(uint64)*PixelCount));
 			CUDA_CHECK(cudaMemset(RandomGeneratorPixelOffset,0,sizeof(uint64)*PixelCount));
 		}
-		//UniquePtrDevice textureViewsDevice;
-		//CUDA_CHECK(cudaMalloc(textureViewsDevice.GetAddressOfPtr(),sizeof(TextureManager)*TextureManager::GetSize()));
-		//CUDA_CHECK(cudaMemcpy(textureViewsDevice.GetPtr(),));
-
 		glfwInit();
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);

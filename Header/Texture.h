@@ -56,11 +56,7 @@ private:
 	cudaResourceDesc resDesc;
 	cudaTextureObject_t texObj = 0;
 	TextureView textureView;
-	bool releaseGpuArrayWhenDispose = true;
 public:
-	void SetIfReleaseGpuArrayWhenDispose(bool boolean) {
-		releaseGpuArrayWhenDispose = boolean;
-	}
 	cudaTextureObject_t GetTextureId() {
 		return texObj;
 	}
@@ -74,7 +70,6 @@ public:
 	inline TextureView GetTextureView(){
 		return textureView;
 	}
-	Texture2D()=default;
 	static inline Texture2D LoadLDRImage(const char* path){
 		uint w,h,channel;
 		unsigned char* data=ReadLDRImage(path,w,h,channel);
@@ -116,18 +111,72 @@ public:
 		return LoadImageFromFile(path);
 	}
 	~Texture2D() {
-		if (releaseGpuArrayWhenDispose) {
-			// Destroy texture object
+		ReleaseGPUResource();
+	}
+	void ReleaseGPUResource(){
+		if (cuArray) {
 			CUDA_CHECK(cudaDestroyTextureObject(texObj));
-
-			// Free device memory
-			if (cuArray) {
-				CUDA_CHECK(cudaFreeArray(cuArray));
-			}
+			CUDA_CHECK(cudaFreeArray(cuArray));
+			std::cout<<"删除纹理"<<"w: "<<this->textureView.width<<"h: "<<this->textureView.height<<endl;
+			cuArray=nullptr;
 		}
 	}
-	//Texture2D() = delete;
-private:
+	Texture2D()=default;
+	// 重载拷贝构造和移动构造，以及左值和右值的赋值
+	Texture2D(Texture2D& in){
+		if(this->cuArray!=in.cuArray){
+			ReleaseGPUResource();
+			this->textureFormat=in.textureFormat;
+			this->cuArray=in.cuArray;
+			this->channelDesc=in.channelDesc;
+			this->texDesc=in.texDesc;
+			this->resDesc=in.resDesc;
+			this->texObj=in.texObj;
+			this->textureView=in.textureView;
+			in.cuArray=nullptr;
+		}
+	}
+	Texture2D(Texture2D&& in){
+		if(this->cuArray!=in.cuArray){
+			ReleaseGPUResource();
+			this->textureFormat=in.textureFormat;
+			this->cuArray=in.cuArray;
+			this->channelDesc=in.channelDesc;
+			this->texDesc=in.texDesc;
+			this->resDesc=in.resDesc;
+			this->texObj=in.texObj;
+			this->textureView=in.textureView;
+			in.cuArray=nullptr;
+		}
+	}
+	Texture2D& operator=(Texture2D& in){
+		if(this->cuArray!=in.cuArray){
+			ReleaseGPUResource();
+			this->textureFormat=in.textureFormat;
+			this->cuArray=in.cuArray;
+			this->channelDesc=in.channelDesc;
+			this->texDesc=in.texDesc;
+			this->resDesc=in.resDesc;
+			this->texObj=in.texObj;
+			this->textureView=in.textureView;
+			in.cuArray=nullptr;
+		}
+		return *this;
+	}
+	Texture2D& operator=(Texture2D&& in){
+		if(this->cuArray!=in.cuArray){
+			ReleaseGPUResource();
+			this->textureFormat=in.textureFormat;
+			this->cuArray=in.cuArray;
+			this->channelDesc=in.channelDesc;
+			this->texDesc=in.texDesc;
+			this->resDesc=in.resDesc;
+			this->texObj=in.texObj;
+			this->textureView=in.textureView;
+			in.cuArray=nullptr;
+		}
+		return *this;
+	}
 	Texture2D(void* h_data,uint width, uint height,unsigned char textureFormat) {
 		size_t sizeOfPixel;
 		if(textureFormat==TEXTURE_FORMAT_UCHAR1){
@@ -189,4 +238,29 @@ private:
 		CUDA_CHECK(cudaDeviceSynchronize());
 		textureView={width,height,textureFormat,texObj};
 	}
+};
+
+class TextureManager{
+	// 单例类，延长纹理的声明周期
+public:
+	static inline TextureManager& GetInstance(){
+		static TextureManager ins;
+		return ins;
+	}
+	void Add(string name,Texture2D tex){
+		if(textures.find(name)==textures.end()){
+			textures[name]=tex;
+		}
+		else{
+			throw std::runtime_error("Texture Manager: attempt to add two textures with same name");
+		}
+	}
+private:
+	unordered_map<string,Texture2D> textures;
+	TextureManager()=default;
+	~TextureManager(){
+		std::cout<<"正在析构 TextureManager"<<endl;
+	}
+	TextureManager(const TextureManager&)=delete;
+	TextureManager& operator=(const TextureManager&)=delete; 
 };

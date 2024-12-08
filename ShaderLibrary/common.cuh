@@ -686,7 +686,7 @@ struct SurfaceData{
 		Position=v1 * Centrics.x + v2 * Centrics.y + v3 * Centrics.z;
 		if (IsTextureViewValid(ModelDataptr->MaterialData->BaseColorMap)) {
 			float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
-			BaseColor = make_float3(tmp.x, tmp.y, tmp.z);
+			BaseColor = make_float3(tmp.x, tmp.y, tmp.z)*ModelDataptr->MaterialData->BaseColor;
 		}
 		else {
 			BaseColor = ModelDataptr->MaterialData->BaseColor;
@@ -694,8 +694,8 @@ struct SurfaceData{
 		
 		if (IsTextureViewValid(ModelDataptr->MaterialData->ARMMap)) {
 			float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->ARMMap, TexCoord.x, TexCoord.y);
-			Roughness = tmp.y;
-			Metallic = tmp.z;
+			Roughness = tmp.y*ModelDataptr->MaterialData->Roughness;
+			Metallic = tmp.z*ModelDataptr->MaterialData->Metallic;
 			AO = tmp.x;
 		}
 		else {

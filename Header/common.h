@@ -215,16 +215,22 @@ public:
     //拷贝构造
     UniquePtr(const UniquePtr&) = delete;
     //移动构造
-    UniquePtr(const UniquePtr&& in) { this->Ptr = in.Ptr; }
+    UniquePtr(const UniquePtr&&) = delete;
     ~UniquePtr() { Destroy(); }
     UniquePtr& operator=(T*& p) {
-        this->Ptr = p;
-        p = nullptr;
+        if (this->Ptr != p) {
+            Destroy();
+            this->Ptr = p;
+            p = nullptr;
+        }
         return *this;
     }
     UniquePtr& operator=(T*&& p) {
-        this->Ptr = p;
-        p = nullptr;
+        if (this->Ptr != p) {
+            Destroy();
+            this->Ptr = p;
+            p = nullptr;
+        }
         return *this;
     }
     UniquePtr& operator=(UniquePtr&& other) {

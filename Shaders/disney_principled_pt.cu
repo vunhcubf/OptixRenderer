@@ -321,7 +321,7 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 
 	// 首先发射primary ray
 	HitInfo hitInfo;
-	TraceRay(hitInfo,RayOrigin, RayDirection,1e-3f, 0, 2, 0);
+	TraceRay(hitInfo,RayOrigin, RayDirection,1e-3f, 0, 1, 0);
 	if(hitInfo.surfaceType==Miss){
 		MissData* data = (MissData*)hitInfo.SbtDataPtr;
 		float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
@@ -368,7 +368,7 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		float3 BxdfWeight;
 		PrincipledBsdf(RecursionDepth,surfaceData,RayDirection,BxdfWeight,TraceGlass);
 		// 立即追踪bxdf光线
-		TraceRay(hitInfo,surfaceData.Position, RayDirection,1e-3f, 0, 2, 0);
+		TraceRay(hitInfo,surfaceData.Position, RayDirection,1e-3f, 0, 1, 0);
 		// 直接光
 		float3 SamplePoint = RandomSamplePointOnLight(make_float2(Noise4.w,Noise4.z));
 		float3 RayDirDirectLight = normalize(SamplePoint - RayOrigin);
@@ -376,7 +376,7 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		if(!TraceGlass){
 			if (dot(surfaceData.Normal, RayDirDirectLight) > 1e-2f && RayDirDirectLight.z > 1e-2f) {
 				HitInfo hitInfoDirectLight;
-				TraceRay(hitInfoDirectLight, RayOrigin, RayDirDirectLight,1e-3f, 0, 2, 0);
+				TraceRay(hitInfoDirectLight, RayOrigin, RayDirDirectLight,1e-3f, 0, 1, 0);
 				float3 lightColor=hitInfoDirectLight.surfaceType==Light ? RayTracingGlobalParams.areaLight.Color : make_float3(0.0f);
 				float Dw = RayTracingGlobalParams.areaLight.Area * saturate(dot(surfaceData.Normal, RayDirDirectLight) + 1e-4f) * saturate(RayDirDirectLight.z) / squared_length(RayOrigin - SamplePoint);
 				RadienceDirect = lightColor * Dw * surfaceData.BaseColor * REVERSE_PI;
@@ -416,4 +416,8 @@ extern "C" __global__ void __miss__fetchMissInfo()
 	hitInfo.TriangleCentroidCoord=make_float2(0.0f);
 	hitInfo.surfaceType=Miss;
 	SetPayLoad(hitInfo);
+}
+
+extern "C" __global__ void __intersection__test(){
+
 }

@@ -109,7 +109,7 @@ void SceneManager::AddObjects(ObjectDesc desc, string Name)
 	TriangleInput.triangleArray.vertexBuffers = &vertexBuffer;
 
 	TriangleInput.triangleArray.flags = TriangleInputFlags;
-	TriangleInput.triangleArray.numSbtRecords = 1;
+	TriangleInput.triangleArray.numSbtRecords = NumSbtRecords;
 	//加速结构大小
 	OptixAccelBufferSizes GASBufferSize;
 	OPTIX_CHECK(optixAccelComputeMemoryUsage(
@@ -188,7 +188,7 @@ void SceneManager::AddObjects(ObjectDesc desc, string Name)
 	objects[Name].SbtRecordsData = vector<UniquePtrDevice>(NumSbtRecords);
 	//设置sbts
 	for (uint i = 0; i < NumSbtRecords; i++) {
-		string& item = desc.shaders[std::min(i, NumSbtRecords)];
+		string& item = desc.shaders.at(std::min(i, NumSbtRecords));
 		objects[Name].SbtRecordsData.at(i) = (void*)CreateSbtRecord<SbtDataStruct>(shaderManager.at(item), { (CUdeviceptr)objects[Name].ModelData.GetPtr() });
 	}
 
@@ -247,7 +247,6 @@ void SceneManager::BuildScene()
 		}
 		Counter++;
 	}
-	//装配hitgroup sbtrecords
 	OptixInstance* InstancesDevice;
 	CUDA_CHECK(cudaMalloc(&InstancesDevice, sizeof(OptixInstance) * NumObjs));
 	CUDA_CHECK(cudaMemcpy(InstancesDevice, instances.data(), sizeof(OptixInstance) * NumObjs, cudaMemcpyHostToDevice));
