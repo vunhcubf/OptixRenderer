@@ -7,6 +7,7 @@
 #include "runtime_shader_compile.h"
 #include "random_host.h"
 #include <windows.h>
+#include "Light.h"
 
 using namespace sutil;
 static const char* vertexShaderSource = "#version 330 core\n"
@@ -36,7 +37,7 @@ void main() {
 		string ProjectPath = getParentDir(getParentDir(getParentDir(getExecutablePath())));// 向前滚动两级别
 		string CompiledShaderPath = ProjectPath + "/CompiledShaders";
 		string ShaderPath = ProjectPath + "/Shaders";
-		string BlueNoiseMapPath=ProjectPath + "/Assets/Textures/stbn_vec3_2Dx1D_128x128x64_49.png";
+		string BlueNoiseMapPath = ProjectPath + "/Assets/Textures/stbn_vec3_2Dx1D_128x128x64_49.png";
 		// 加载蓝噪声图
 		BlueNoiseMapBufferManager BlueNoise(BlueNoiseMapPath.c_str());
 		// 所有文件都编译
@@ -45,10 +46,10 @@ void main() {
 		// 开始编译
 		stringstream compilationOutput;
 		{
-			
+
 			for (auto& shader_to_compile_inst : shader_sources) {
 				//std::cout << "正在编译着色器：" << shader_to_compile_inst.first << endl;
-				compilationOutput<< "正在编译着色器：" << shader_to_compile_inst.first<<"\n";
+				compilationOutput << "正在编译着色器：" << shader_to_compile_inst.first << "\n";
 				nvrtcProgram prog;
 				nvrtcCreateProgram(&prog,             // 程序
 					shader_to_compile_inst.second.c_str(),    // 源码字符串
@@ -56,51 +57,51 @@ void main() {
 					0,
 					nullptr,
 					nullptr);    // 头文件和包括
-		
+
 				// 编译选项，指定 GPU 架构
-				const char* opts[] = { 
+				const char* opts[] = {
 					"--gpu-architecture=compute_89",
 					"-IC:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3/include",
 					"-IC:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0/include",
 					"-IC:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0/SDK",
 					"-ID:/OptixRenderer/ShaderLibrary",
 				};
-		
+
 				nvrtcResult compileResult = nvrtcCompileProgram(prog, 5, opts);
-		
+
 				// 检查编译错误
 				if (compileResult != NVRTC_SUCCESS) {
 					size_t logSize;
 					nvrtcGetProgramLogSize(prog, &logSize);
 					std::vector<char> log(logSize);
 					nvrtcGetProgramLog(prog, log.data());
-					compilationOutput<<"Compilation error:"<<compileResult<<"\n" << log.data() << "\n";
+					compilationOutput << "Compilation error:" << compileResult << "\n" << log.data() << "\n";
 					//std::cerr << "Compilation error:"<<compileResult<<"\n" << log.data() << std::endl;
 				}
-		
+
 				// 获取 PTX 代码
 				size_t ptxSize;
 				nvrtcGetPTXSize(prog, &ptxSize);
 				std::vector<char> ptx(ptxSize);
 				nvrtcGetPTX(prog, ptx.data());
 				// 写入PTX
-				std::ofstream file(CompiledShaderPath+"/"+ shader_to_compile_inst.first+".ptx");
-		
+				std::ofstream file(CompiledShaderPath + "/" + shader_to_compile_inst.first + ".ptx");
+
 				if (!file) {
-					compilationOutput<< "Error opening file for writing: " << shader_to_compile_inst.first<<".ptx" << "\n";
+					compilationOutput << "Error opening file for writing: " << shader_to_compile_inst.first << ".ptx" << "\n";
 					//std::cerr << "Error opening file for writing: " << shader_to_compile_inst.first<<".ptx" << std::endl;
 					return;
 				}
-		
+
 				file << ptx.data();
-		
+
 				file.close();
 			}
-			
+
 		}
-		std::cout<<compilationOutput.str()<<std::endl;
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr");
-		TextureManager::GetInstance().Add("skybox",skybox);
+		std::cout << compilationOutput.str() << std::endl;
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/zwartkops_straight_morning_2k.png");
+		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
 		double2 MousePos;
@@ -132,8 +133,8 @@ void main() {
 		scene.AddHitShader("HitGroup_occluded", "module_smallpt_styled", "__closesthit__occluded", "", "");
 		scene.AddHitShader("HitGroup_principled_bsdf", "module_disney_principled", "__closesthit__principled_bsdf", "", "");
 		scene.AddHitShader("HitGroup_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
-		
-		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_test", "module_disney_principled", "__closesthit__test", "", "__intersection__test");
+
+		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_sphere_light", "module_disney_principled", "__closesthit__sphere_light", "", "__intersection__sphere_light");
 		{
 			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
 			for (const auto& one : cornel) {
@@ -160,31 +161,28 @@ void main() {
 				scene.AddObjects(desc, name);
 			}
 		}
+		//{
+		//	string name = "area_light";
+		//	ObjectDesc desc;
+		//	desc.mesh = Mesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
+		//	desc.mat.MaterialType = MATERIAL_AREALIGHT;
+		//	desc.shaders = { "HitGroup_fetchHitInfo" };
+		//	scene.AddObjects(desc, name);
+		//}
+		SphereLight SphereLight1(
+			make_float3(0.077,0.115,1.1535), 0.3, make_float3(1, 0, 1));
 		{
-			string name = "area_light";
-			ObjectDesc desc;
-			desc.mesh = Mesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
-			desc.mat.MaterialType = MATERIAL_AREALIGHT;
-			desc.shaders = { "HitGroup_fetchHitInfo" };
-			scene.AddObjects(desc, name); 
-		}
-		{
-			string name = "test_geo";
-			OptixAabb aabb;
-			aabb.maxX = 1;
-			aabb.maxY = 1;
-			aabb.maxZ = 1;
-			aabb.minX = 0;
-			aabb.minY = 0;
-			aabb.minZ = 0;
-			ProceduralGeometryMaterialBuffer buffer;
-			scene.AddProceduralObject(name, aabb, buffer, { "HitGroup_fetchHitInfo_proceduralgeo_test" });
+			string name = "sphere_light1";
+			scene.AddProceduralObject(
+				name, SphereLight1.GetAabb(), 
+				SphereLight1.PackMaterialBuffer(), 
+				{"HitGroup_fetchHitInfo_proceduralgeo_sphere_light"},true);
 		}
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
 		scene.ConfigureRGSbt({ 1.0f,0.0f,1.0f });
 		scene.BuildSceneWithProceduralGeometrySupported();
-
+		LightManager::GetInstance().UploadLightList();
 		MyCamera camera(make_float3(0, -5.0f, 0), make_float2(M_PI * 0.5, M_PI / 2));
 
 		AreaLight Light;
@@ -422,6 +420,9 @@ void main() {
 			if (FirstTime) {
 				FirstTime = false;
 				LaunchParameters params;
+				params.LightListArrayptr = LightManager::GetInstance().GetPtr();
+				params.LightListLength = LightManager::GetInstance().GetLength();
+
 				params.ImagePtr = devPtr;
 				params.Width = width;
 				params.Height = height;

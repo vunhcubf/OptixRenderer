@@ -2,6 +2,7 @@
 #include "raytracing.cuh"
 #include "bxdf.cuh"
 #include "payload.cuh"
+#include "light.cuh"
 enum BxdfType {
 	Dielectric,
 	Metal,
@@ -334,10 +335,6 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		}
 		return;
 	}
-	else if(hitInfo.surfaceType==ProceduralObject){
-		RayTracingGlobalParams.IndirectOutputBuffer[pixel_id]=make_float3(1,0,1);
-		return;
-	}
 	else if(hitInfo.surfaceType==Light){
 		RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = RayTracingGlobalParams.areaLight.Color;
 		return;
@@ -374,20 +371,23 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		// 立即追踪bxdf光线
 		TraceRay(hitInfo,surfaceData.Position, RayDirection,1e-3f, 0, 1, 0);
 		// 直接光
-		float3 SamplePoint = RandomSamplePointOnLight(make_float2(Noise4.w,Noise4.z));
-		float3 RayDirDirectLight = normalize(SamplePoint - RayOrigin);
+		float3 Color, LightCenter;
+		float Radius;
+		float* sphereLightData=FetchLightData(0);
+		DecodeSphereLight(sphereLightData, LightCenter, Radius, Color);
+		float4 SampleResult = SampleSphereLight(Noise4.w, Noise4.z, surfaceData.Position, LightCenter, Radius);
+		float3 RayDirDirectLight = make_float3(SampleResult.x, SampleResult.y, SampleResult.z);
+		float pdfSphereLight = SampleResult.w;
 		float3 RadienceDirect=make_float3(0.0f);
 		if(!TraceGlass){
-			if (dot(surfaceData.Normal, RayDirDirectLight) > 1e-2f && RayDirDirectLight.z > 1e-2f) {
-				HitInfo hitInfoDirectLight;
-				TraceRay(hitInfoDirectLight, RayOrigin, RayDirDirectLight,1e-3f, 0, 1, 0);
-				float3 lightColor=hitInfoDirectLight.surfaceType==Light ? RayTracingGlobalParams.areaLight.Color : make_float3(0.0f);
-				float Dw = RayTracingGlobalParams.areaLight.Area * saturate(dot(surfaceData.Normal, RayDirDirectLight) + 1e-4f) * saturate(RayDirDirectLight.z) / squared_length(RayOrigin - SamplePoint);
-				RadienceDirect = lightColor * Dw * surfaceData.BaseColor * REVERSE_PI;
-			}
+			HitInfo hitInfoDirectLight;
+			TraceRay(hitInfoDirectLight, RayOrigin, RayDirDirectLight,1e-3f, 0, 1, 0);
+			float3 lightColor=hitInfoDirectLight.surfaceType==SurfaceType::Light ? Color : make_float3(0.0f);
+			float Dw = RayTracingGlobalParams.areaLight.Area * saturate(dot(surfaceData.Normal, RayDirDirectLight) + 1e-4f);
+			RadienceDirect = lightColor * Dw * surfaceData.BaseColor * REVERSE_PI;
 			// MIS
 			float PdfDiffuse=saturate(dot(surfaceData.Normal,RayDirection))*REVERSE_PI;
-			float PdfLight = 1 / RayTracingGlobalParams.areaLight.Area;
+			float PdfLight = pdfSphereLight;
 			float MISWeight=1.0f;
 			if (hitInfo.surfaceType==Light) {
 				MISWeight=PdfDiffuse / (PdfDiffuse + PdfLight);
@@ -422,14 +422,46 @@ extern "C" __global__ void __miss__fetchMissInfo()
 	SetPayLoad(hitInfo);
 }
 
-extern "C" __global__ void __intersection__test(){
-	optixReportIntersection(optixGetRayTmin()+1e-3f,0);
+extern "C" __global__ void __intersection__sphere_light() {
+    float3 ray_origin = optixGetWorldRayOrigin();
+    float3 ray_direction = optixGetWorldRayDirection();
+    float tmin = optixGetRayTmin(); 
+    float tmax = optixGetRayTmax(); 
+	ProceduralGeometryMaterialBuffer* data = (ProceduralGeometryMaterialBuffer*)(((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr);
+	float3 pos;
+	float radius;
+	pos.x = data->Elements[1];
+	pos.y = data->Elements[2];
+	pos.z = data->Elements[3];
+	radius = data->Elements[4];
+    float3& sphere_center = pos;
+    float& sphere_radius = radius;
+    float3 oc = ray_origin - sphere_center;
+    float A = dot(ray_direction, ray_direction); 
+    float B = 2.0f * dot(oc, ray_direction); 
+    float C = dot(oc, oc) - sphere_radius * sphere_radius; 
+    float discriminant = B * B - 4.0f * A * C;
+    if (discriminant > 0.0f) {
+        float sqrt_discriminant = sqrtf(discriminant);
+        float t1 = (-B - sqrt_discriminant) / (2.0f * A);
+        float t2 = (-B + sqrt_discriminant) / (2.0f * A);
+        float t = tmax;  
+        if (t1 > tmin && t1 < tmax) {
+            t = t1;
+        }
+        if (t2 > tmin && t2 < tmax && t2 < t) {
+            t = t2; 
+        }
+        if (t > tmin && t < tmax) {
+            optixReportIntersection(t, 0); 
+        }
+    }
 }
-extern "C" __global__ void __closesthit__test(){
+extern "C" __global__ void __closesthit__sphere_light(){
 	HitInfo hitInfo;
-	hitInfo.PrimitiveID=optixGetPrimitiveIndex();
-	hitInfo.SbtDataPtr=((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;// 神秘的测试代码
-	hitInfo.TriangleCentroidCoord=optixGetTriangleBarycentrics();
-	hitInfo.surfaceType=SurfaceType::ProceduralObject;
+	hitInfo.PrimitiveID=0;
+	hitInfo.SbtDataPtr=((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;
+	hitInfo.TriangleCentroidCoord=make_float2(0,0);
+	hitInfo.surfaceType= SurfaceType::Light;
 	SetPayLoad(hitInfo);
 }

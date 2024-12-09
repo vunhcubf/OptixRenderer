@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <cuda_gl_interop.h>
 
+#include "Light.h"
 #include "ComputeShader.h"
 #include "Texture.h"
 #include "objloader.h"
@@ -158,7 +159,7 @@ public:
 	void ConfigureRGSbt(RayGenData Data);
 	void BuildScene();
 
-	void AddProceduralObject(string name, OptixAabb aabb, ProceduralGeometryMaterialBuffer mat,vector<string> shaders);
+	void AddProceduralObject(string name, OptixAabb aabb, ProceduralGeometryMaterialBuffer mat,vector<string> shaders,bool isLight);
 	void BuildSceneWithProceduralGeometrySupported();
 private:
 	UniquePtrDevice LaunchParameter;

@@ -33,9 +33,7 @@ typedef float float32;
 typedef double float64;
 
 struct ProceduralGeometryMaterialBuffer {
-    float4 E1;
-    float4 E2;
-    float4 E3;
+    float Elements[16] = {};
 };
 
 struct TextureView{
@@ -195,7 +193,8 @@ struct LaunchParameters {
     // 随机数生成
     uint64* PixelOffset;
 	BlueNoiseMapBuffer* BlueNoiseBuffer;
-	TextureView* textureDiscriptorsRange;
+    CUdeviceptr LightListArrayptr;
+    uint LightListLength;
 };
 struct ModelData {
     GeometryBuffer* GeometryData;

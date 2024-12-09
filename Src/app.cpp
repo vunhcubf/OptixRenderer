@@ -130,19 +130,13 @@ void SceneManager::AddObjects(ObjectDesc desc, string Name)
 		GASBufferSize.outputSizeInBytes
 	));
 	OPTIX_CHECK(optixAccelBuild(
-		Context,
-		0,                  // CUDA stream
-		&AccelBuildOpts,
-		&TriangleInput,
-		1,                  // num build inputs
+		Context,0,&AccelBuildOpts,
+		&TriangleInput,1,                
 		ScratchBuffer,
 		GASBufferSize.tempSizeInBytes,
 		(CUdeviceptr)GASOutputBuffer.GetPtr(),
 		GASBufferSize.outputSizeInBytes,
-		&Handle,
-		nullptr,            // emitted property list
-		0                   // num emitted properties
-	));
+		&Handle,nullptr,0));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(ScratchBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(vertexBuffer)));
 
@@ -188,7 +182,7 @@ void SceneManager::AddObjects(ObjectDesc desc, string Name)
 	objects[Name].SbtRecordsData = vector<UniquePtrDevice>(NumSbtRecords);
 	//设置sbts
 	for (uint i = 0; i < NumSbtRecords; i++) {
-		string& item = desc.shaders.at(std::min(i, NumSbtRecords));
+		string& item = desc.shaders.at(i);
 		objects[Name].SbtRecordsData.at(i) = (void*)CreateSbtRecord<SbtDataStruct>(shaderManager.at(item), { (CUdeviceptr)objects[Name].ModelData.GetPtr() });
 	}
 
@@ -205,7 +199,7 @@ void SceneManager::AddObjects(ObjectDesc desc, string Name)
 	}
 }
 
-void SceneManager::AddProceduralObject(string name, OptixAabb aabb, ProceduralGeometryMaterialBuffer mat,vector<string> shaders){
+void SceneManager::AddProceduralObject(string name, OptixAabb aabb, ProceduralGeometryMaterialBuffer mat,vector<string> shaders,bool isLight){
 	// GAS句柄
 	OptixTraversableHandle Handle;
 	UniquePtrDevice GASOutputBuffer;
@@ -273,7 +267,7 @@ void SceneManager::AddProceduralObject(string name, OptixAabb aabb, ProceduralGe
 	proceduralObjects[name].SbtRecordsData = vector<UniquePtrDevice>(NumSbtRecords);
 	//设置sbts
 	for (uint i = 0; i < NumSbtRecords; i++) {
-		string& item = shaders.at(std::min(i, NumSbtRecords));
+		string& item = shaders.at(i);
 		proceduralObjects[name].SbtRecordsData.at(i) = (void*)CreateSbtRecord<SbtDataStruct>(shaderManager.at(item), { MaterialBuffer });
 	}
 	cout << "\n导入程序化几何体:" << name << endl;
@@ -281,6 +275,9 @@ void SceneManager::AddProceduralObject(string name, OptixAabb aabb, ProceduralGe
 	cout << "GAS句柄: " << proceduralObjects.at(name).GASHandle << endl;
 	for (uint i = 0; i < NumSbtRecords; i++) {
 		cout << "SBT记录地址" << i << ": " << proceduralObjects.at(name).SbtRecordsData.at(i).GetPtr() << endl;
+	}
+	if (isLight) {
+		LightManager::GetInstance().Add(MaterialBuffer);
 	}
 }
 void SceneManager::ConfigureMissSbt(MissData Data)

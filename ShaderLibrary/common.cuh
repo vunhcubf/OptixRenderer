@@ -23,6 +23,16 @@ typedef unsigned long long uint64;
 typedef long long int64;
 typedef float float32;
 typedef double float64;
+
+enum LightType :uint {
+	Sphere = 0xFFFF0000,
+	Area = 0xFFFF0001,
+	Directional = 0xFFFF0002
+};
+
+struct ProceduralGeometryMaterialBuffer {
+	float Elements[16] = {};
+};
 struct TextureView{
 	uint width=0;
 	uint height=0;
@@ -33,11 +43,11 @@ static __device__ bool IsTextureViewValid(TextureView view){
 	return view.width!=0 && view.height!=0;
 }
 const float goldenRatioConjugate = 0.061803398875f;
-enum SurfaceType : uint{
-	Light,
-	Opaque,
-	Miss,
-	ProceduralObject
+enum SurfaceType : uint {
+	Light = 0x0,
+	Opaque = 0x1,
+	Miss = 0x2,
+	ProceduralObject = 0x3
 };
 __device__ __forceinline__ uint3 operator>>(uint3 x,uint i){
 	return make_uint3(x.x>>i,x.y>>i,x.z>>i);
@@ -230,7 +240,8 @@ struct LaunchParameters {
     // 随机数生成
     uint64* PixelOffset;
 	BlueNoiseMapBuffer* BlueNoiseBuffer;
-	TextureView* textureDiscriptorsRange;
+	CUdeviceptr LightListArrayptr;
+	uint LightListLength;
 };
 
 //原理化BSDF
