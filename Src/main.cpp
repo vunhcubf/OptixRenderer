@@ -100,7 +100,7 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/zwartkops_straight_morning_2k.png");
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/furnance_test.png");
 		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
@@ -115,23 +115,15 @@ void main() {
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
-		scene.ImportCompiledShader(ProjectPath + "/CompiledShaders/smallpt_styled.cu.ptx", "module_smallpt_styled");
-		scene.ImportCompiledShader(ProjectPath + "/CompiledShaders/basic.cu.ptx", "module_basic");
 		scene.ImportCompiledShader(ProjectPath + "/CompiledShaders/disney_principled_pt.cu.ptx", "module_disney_principled");
 		// 加载一般的核函数
 		string AccumulateCsPath = ProjectPath + "/CompiledShaders/kernels.cu.ptx";
-
 		CUmodule AccumulateCs = LoadModule(AccumulateCsPath);
 		CUfunction AccumulateCs_Fn = LoadFunction(AccumulateCs, "AccumulateFrame");
 
 		scene.AddMissShader("__miss__fetchMissInfo", "module_disney_principled");
 		scene.AddRayGenerationShader("__raygen__principled_bsdf", "module_disney_principled");
 
-		scene.AddHitShader("HitGroup_diffuse", "module_smallpt_styled", "__closesthit__diffuse", "", "");
-		scene.AddHitShader("HitGroup_glossy", "module_smallpt_styled", "__closesthit__glossy", "", "");
-		scene.AddHitShader("HitGroup_glass", "module_smallpt_styled", "__closesthit__glass", "", "");
-		scene.AddHitShader("HitGroup_occluded", "module_smallpt_styled", "__closesthit__occluded", "", "");
-		scene.AddHitShader("HitGroup_principled_bsdf", "module_disney_principled", "__closesthit__principled_bsdf", "", "");
 		scene.AddHitShader("HitGroup_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
 
 		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_sphere_light", "module_disney_principled", "__closesthit__sphere_light", "", "__intersection__sphere_light");
@@ -161,16 +153,8 @@ void main() {
 				scene.AddObjects(desc, name);
 			}
 		}
-		//{
-		//	string name = "area_light";
-		//	ObjectDesc desc;
-		//	desc.mesh = Mesh::LoadMeshFromFile(ProjectPath + "/Assets/Models/" + name + ".obj");
-		//	desc.mat.MaterialType = MATERIAL_AREALIGHT;
-		//	desc.shaders = { "HitGroup_fetchHitInfo" };
-		//	scene.AddObjects(desc, name);
-		//}
 		SphereLight SphereLight1(
-			make_float3(0.077,0.115,1.1535), 0.3, make_float3(1, 0, 1));
+			make_float3(0.077,0.115,1.1535), 0.3, make_float3(1,1,1),2);
 		{
 			string name = "sphere_light1";
 			scene.AddProceduralObject(
@@ -184,17 +168,7 @@ void main() {
 		scene.BuildSceneWithProceduralGeometrySupported();
 		LightManager::GetInstance().UploadLightList();
 		MyCamera camera(make_float3(0, -5.0f, 0), make_float2(M_PI * 0.5, M_PI / 2));
-
-		AreaLight Light;
-		Light.P1 = make_float3(-0.384588, -0.384588, 1.324847);
-		Light.P2 = make_float3(0.384588, -0.384588, 1.324847);
-		Light.P4 = make_float3(-0.384588, 0.384588, 1.324847);
-		Light.P3 = make_float3(0.384588, 0.384588, 1.324847);
-		Light.Color = make_float3(20,20,20);
-		Light.Area = 0.652511;
-		LaunchParametersDesc desc;
-		desc.areaLight = Light;
-		desc.cameraData = camera.ExportCameraData(default_width, default_height);
+		CameraData cameraData = camera.ExportCameraData(default_width, default_height);
 
 		int prev_width = default_width;
 		int prev_height = default_height;
@@ -429,7 +403,6 @@ void main() {
 				params.Handle = scene.GetTraversableHandle();
 				params.Seed = static_cast<uint>(rand());
 				params.cameraData = camera.ExportCameraData(width, height);
-				params.areaLight = Light;
 				params.Spp = 1;
 				params.MaxRecursionDepth = scene.GetMaxRecursionDepth();
 				params.IndirectOutputBuffer = (float3*)FrameBuffer2.GetPtr();

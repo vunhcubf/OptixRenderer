@@ -23,6 +23,7 @@ typedef unsigned long long uint64;
 typedef long long int64;
 typedef float float32;
 typedef double float64;
+static const float FloatOneMinusEpsilon = 0x1.fffffep-1;
 
 enum LightType :uint {
 	Sphere = 0xFFFF0000,
@@ -150,11 +151,6 @@ struct SbtDataStruct
 {
     CUdeviceptr DataPtr;
 };
-struct LaunchParametersDesc {
-    CameraData cameraData;
-    AreaLight areaLight;
-};
-
 
 struct GeometryBuffer {
     CUdeviceptr Normal=(CUdeviceptr)nullptr;
@@ -232,7 +228,6 @@ struct LaunchParameters {
     uint Height;
     CameraData cameraData;
     OptixTraversableHandle Handle;
-    AreaLight areaLight;
     uint Seed;
     uint64 FrameNumber;
     uint Spp;
@@ -455,24 +450,24 @@ static __device__ float Rand(uint& seed) {
 	seed += 0xFC879023U;
 	return rnd(seed1);
 }
-static __device__ float3 RandomSamplePointOnLight(uint& Seed) {
-	float r1 = Rand(Seed);
-	float r2 = Rand(Seed);
-	AreaLight light = RayTracingGlobalParams.areaLight;
-	return lerp(
-		lerp(light.P1, light.P2, r1),
-		lerp(light.P4, light.P3, r1),
-		r2);
-}
-static __device__ float3 RandomSamplePointOnLight(float2 rand) {
-	float r1 = rand.x;
-	float r2 = rand.y;
-	AreaLight light = RayTracingGlobalParams.areaLight;
-	return lerp(
-		lerp(light.P1, light.P2, r1),
-		lerp(light.P4, light.P3, r1),
-		r2);
-}
+//static __device__ float3 RandomSamplePointOnLight(uint& Seed) {
+//	float r1 = Rand(Seed);
+//	float r2 = Rand(Seed);
+//	AreaLight light = RayTracingGlobalParams.areaLight;
+//	return lerp(
+//		lerp(light.P1, light.P2, r1),
+//		lerp(light.P4, light.P3, r1),
+//		r2);
+//}
+//static __device__ float3 RandomSamplePointOnLight(float2 rand) {
+//	float r1 = rand.x;
+//	float r2 = rand.y;
+//	AreaLight light = RayTracingGlobalParams.areaLight;
+//	return lerp(
+//		lerp(light.P1, light.P2, r1),
+//		lerp(light.P4, light.P3, r1),
+//		r2);
+//}
 static __device__ float3 ImportanceSampleCosWeight(uint& Seed,float3 N) {
 	float phi = Rand(Seed);
 	float theta = Rand(Seed) * 2.0f * PI;
@@ -496,7 +491,7 @@ static __device__ float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
 	float theta = rand.y * 2.0f * PI;
 	phi = asin(sqrt(phi));
 	float3 T;
-	if (N.x == 0 && N.z == 0) {
+	if (abs(N.x)<1e-3f) {
 		T = make_float3(0, N.z, -N.y);//x
 	}
 	else {
@@ -625,14 +620,12 @@ static __device__ float RndUniform(){
 	uint3 id=optixGetLaunchIndex();
 	curandStateXORWOW_t state;
 	uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
-	uint64 ThreadCount=RayTracingGlobalParams.Width*RayTracingGlobalParams.Height;
 	curand_init(RayTracingGlobalParams.Seed,
 		RayTracingGlobalParams.FrameNumber*100+RayTracingGlobalParams.PixelOffset[threadid],
 		threadid,&state);
 	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
 	return curand_uniform(&state);
 }
-
 struct SurfaceData{
 	float3 Normal;
 	float3 GeometryNormal;
@@ -725,5 +718,17 @@ struct SurfaceData{
 			NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
 			Normal = UseNormalMap(Normal, NormalMap, 1.0f);
 		}
+#if defined Furnance_test
+		BaseColor = make_float3(1, 1, 1);
+#endif
 	}
 };
+
+template<typename T>
+__device__  __forceinline__ T* GetSbtDataPointer() {
+	return (T*)(((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr);
+}
+template<typename T>
+__device__  __forceinline__ T* GetSbtDataPointer(CUdeviceptr d) {
+	return (T*)d;
+}

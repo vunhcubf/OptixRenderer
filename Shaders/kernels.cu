@@ -1,6 +1,7 @@
 #pragma once
 #include "common.cuh"
 #include "tonemapping.cuh"
+#include "bxdf.cuh"
 //用于多帧合成的核函数
 
 extern "C" __global__ void AccumulateFrame(uint PixelCount, uint64 FrameCounter, uchar4 * OutputSRGBBuffer, float3 * IndirectOutputBuffer, float3 * AccumulateBuffer) {

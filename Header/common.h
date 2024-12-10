@@ -34,6 +34,9 @@ typedef double float64;
 
 struct ProceduralGeometryMaterialBuffer {
     float Elements[16] = {};
+    inline void SetElement0(uint a) {
+        reinterpret_cast<uint*>(&Elements[0])[0] = a;
+    }
 };
 
 struct TextureView{
@@ -75,12 +78,6 @@ struct CameraData {
     float3                 cam_eye;
     float3                 cam_u, cam_v, cam_w;
 };
-
-struct LaunchParametersDesc {
-    CameraData cameraData;
-    AreaLight areaLight;
-};
-
 struct GeometryBuffer {
     CUdeviceptr Normal=(CUdeviceptr)nullptr;
     CUdeviceptr Vertices = (CUdeviceptr)nullptr;
@@ -118,7 +115,7 @@ struct Material
     float3 Emission = make_float3(0, 0, 0);
     float Roughness=0.5f;
     float Metallic = 0.0f;
-    float Specular=1.f;
+    float Specular=0.5f;
     float Transmission = 0.0f;
     float Ior = 1.4f;
     float SpecularTint=0.0f;
@@ -130,7 +127,7 @@ inline void ResetMaterial(Material& mat) {
     mat.NormalMap = {0,0,0,0};
     mat.BaseColorMap = {0,0,0,0};
     mat.ARMMap = {0,0,0,0};
-    mat.BaseColor = make_float3(0.4, 0.4, 0.4);
+    mat.BaseColor = make_float3(1,1,1);
     mat.Emission = make_float3(0, 0, 0);
     mat.Roughness = 0.5f;
     mat.Metallic = 0.0f;
@@ -185,7 +182,6 @@ struct LaunchParameters {
     uint Height;
     CameraData cameraData;
     OptixTraversableHandle Handle;
-    AreaLight areaLight;
     uint Seed;
     uint64 FrameNumber;
     uint Spp;

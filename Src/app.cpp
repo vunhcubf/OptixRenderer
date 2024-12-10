@@ -260,6 +260,9 @@ void SceneManager::AddProceduralObject(string name, OptixAabb aabb, ProceduralGe
 	// 处理shader，材质数据和SBTRecord
 	// 每个sbt的数据结构不变，但是指针换成材质缓冲的指针
 	CUdeviceptr MaterialBuffer;
+	if (isLight) {
+		mat.SetElement0(LightManager::GetInstance().GetNewLightIndex());
+	}
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&MaterialBuffer),sizeof(ProceduralGeometryMaterialBuffer)));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(MaterialBuffer), &mat, sizeof(ProceduralGeometryMaterialBuffer), cudaMemcpyHostToDevice));
 	proceduralObjects[name].MaterialBuffer = reinterpret_cast<void*>(MaterialBuffer);
@@ -277,6 +280,8 @@ void SceneManager::AddProceduralObject(string name, OptixAabb aabb, ProceduralGe
 		cout << "SBT记录地址" << i << ": " << proceduralObjects.at(name).SbtRecordsData.at(i).GetPtr() << endl;
 	}
 	if (isLight) {
+		cout << "灯光材质地址：" << MaterialBuffer << endl;
+		cout << "灯光材质长度：" << sizeof(ProceduralGeometryMaterialBuffer) << endl;
 		LightManager::GetInstance().Add(MaterialBuffer);
 	}
 }
@@ -505,7 +510,7 @@ void SceneManager::BuildSceneWithProceduralGeometrySupported() {
 	pipeLine = CreatePipeline(Context, pipelineCompileOptions, shaders_array, MaxRayRecursiveDepth, MaxSceneTraversalDepth);
 }
 
-void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParametersDesc LParamsDesc, uint Width, uint Height, uint Spp)
+void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, CameraData cameraData, uint Width, uint Height, uint Spp)
 {
 	LaunchParameters params;
 	params.ImagePtr = FrameBuffer;
@@ -513,8 +518,7 @@ void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchPar
 	params.Height = Height;
 	params.Handle = this->TASHandle;
 	params.Seed = static_cast<uint>(rand());
-	params.cameraData = LParamsDesc.cameraData;
-	params.areaLight = LParamsDesc.areaLight;
+	params.cameraData = cameraData;
 	params.Spp = Spp;
 	params.MaxRecursionDepth = MaxRayRecursiveDepth;
 	LaunchParameter = UploadAnything(&params, sizeof(LaunchParameters));

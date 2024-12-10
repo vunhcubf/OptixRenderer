@@ -164,6 +164,6 @@ public:
 private:
 	UniquePtrDevice LaunchParameter;
 public:
-	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParametersDesc LParamsDesc, uint Width, uint Height, uint Spp);
+	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, CameraData cameraData, uint Width, uint Height, uint Spp);
 	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height);
 };
