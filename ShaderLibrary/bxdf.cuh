@@ -31,27 +31,11 @@ static __forceinline__ __device__ float Disney_FD(float FD90, float3 N, float3 W
 static __forceinline__ __device__ float Y(float3 color) {
 	return 0.2126 * color.x + 0.7152 * color.y + 0.0722 * color.z;
 }
-static __forceinline__ __device__ float DistributionGGX(float3 N, float3 H, float roughness)
-{
-	float a = roughness * roughness;
-	a = fminf(a, 1e-3f);
-	float a2 = a * a;
-	float NdotH = dot(N, H);
-	if (NdotH < 0.0f) {
-		return 0.0f;
-	}
-	float NdotH2 = NdotH * NdotH;
 
-	float num = a2;
-	float denom = (NdotH2 * (a2 - 1.0) + 1.0);
-	denom = PI * denom * denom;
-
-	return num / denom;
-}
 static __forceinline__ __device__ float DistributionGGX(float NdotH, float roughness)
 {
 	float a = roughness * roughness;
-	a = fminf(a, 1e-3f);
+	a = fmaxf(a, FloatEpsilon);
 	float a2 = a * a;
 	float NdotH2 = NdotH * NdotH;
 	if (NdotH < 0.0f) {
@@ -60,8 +44,12 @@ static __forceinline__ __device__ float DistributionGGX(float NdotH, float rough
 	float num = a2;
 	float denom = (NdotH2 * (a2 - 1.0) + 1.0);
 	denom = PI * denom * denom;
-
-	return num / denom;
+	ASSERT_VALID(num / fmaxf(denom, FloatEpsilon));
+	return num / fmaxf(denom, FloatEpsilon);
+}
+static __forceinline__ __device__ float DistributionGGX(float3 N, float3 H, float roughness)
+{
+	return DistributionGGX(dot(N, H), roughness);
 }
 static __forceinline__ __device__ float SmithG1(float3 wm, float3 v, float alpha) {
 	float cosTheta = dot(wm, v);
@@ -93,7 +81,9 @@ static __device__ float3 SpecularBrdf(SurfaceData& surfaceData,
 	float Ds = DistributionGGX(HForward, NForward, surfaceData.Roughness);
 	//遮蔽项
 	float Gs = Smith_G(NForward, HForward, V, L, surfaceData.Roughness);
-	return saturate(lerp(fs,Fs,surfaceData.Metallic)) * Gs * Ds / abs(4 * dot(NForward, V) * dot(NForward, L));
+	float3 brdf= lerp(Fs, fs, surfaceData.Transmission) * Gs * Ds / fmaxf(abs(4 * dot(NForward, V) * dot(NForward, L)), FloatEpsilon);
+	ASSERT_VALID(brdf);
+	return brdf;
 }
 static __device__ float3 DiffuseBrdf(SurfaceData& data) {
 	//首先计算漫反射
@@ -110,7 +100,8 @@ static __device__ float3 TransmissionBtdf(SurfaceData& surfaceData,
 
 	float3 numerator = sqrt(surfaceData.BaseColor) * (1 - fs) * Ds * Gs * abs(dot(HForward, L) * dot(HForward, V)) * EtaO * EtaO;
 	float denominator = abs(dot(NForward, V) * dot(NForward, L)) * pow2(EtaI * dot(V, HForward) + EtaO * dot(L, HForward));
-	return (surfaceData.Transmission) * (1 - surfaceData.Metallic)*numerator / denominator;
+	ASSERT_VALID(numerator / fmaxf(denominator, FloatEpsilon));
+	return (surfaceData.Transmission) * (1 - surfaceData.Metallic)*numerator / fmaxf(denominator, FloatEpsilon);
 }
 __device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, float3& RayDirection, float3& BxdfWeight, bool TraceGlass) {
 	// 原理话bsdf包含brdf和btdf
@@ -139,10 +130,10 @@ __device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, flo
 	float3 NForward = InSurface ? surfaceData.Normal : -surfaceData.Normal;
 	float Pdf;
 	float3 Weight;
-	TraceGlass = NoiseSeq[0] < QsGlass;
-	if (NoiseSeq[0] < QsGlass) {
+	TraceGlass = NoiseSeq[0] < SAFETY_MARGIN(QsGlass);
+	if (NoiseSeq[0] < SAFETY_MARGIN(QsGlass)) {
 		// 使用玻璃材质
-		float3 H = ImportanceSampleGGX(make_float2(NoiseSeq[2], NoiseSeq[3]), nullptr, surfaceData.Roughness);
+		float3 H = ImportanceSampleGGX(make_float2(NoiseSeq[2], NoiseSeq[3]), surfaceData.Roughness);
 		float3 T, B;
 		{
 			GetTBNFromN(surfaceData.Normal, T, B);
@@ -153,10 +144,10 @@ __device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, flo
 
 		// 计算菲涅尔
 		float fs = DielectricFresnel(HForward, V, EtaI, EtaO);
-		float QsReflect = lerp(0.1, 0.9, fs);
+		float QsReflect = fs;
 		float QsTransmission = 1 - QsReflect;
 		float3 L;
-		if (NoiseSeq[1] < QsTransmission) {
+		if (NoiseSeq[1] < SAFETY_MARGIN(QsTransmission)) {
 			// 折射
 			L = refract(-V, HForward, EtaI / EtaO, nullptr);
 		}
@@ -173,13 +164,15 @@ __device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, flo
 		float3 Brdf = SpecularBrdf(surfaceData, NForward, HForward, V, L, EtaI, EtaO);
 		float3 Btdf = TransmissionBtdf(surfaceData,NForward,HForward,V,L,EtaO,EtaI);
 
-		if (NoiseSeq[1] < QsTransmission) {
-			// 折射
-			Weight = saturate(-dot(NForward, L)) * Btdf / (PdfTransmission * QsTransmission * QsGlass);
+		if (NoiseSeq[1] < SAFETY_MARGIN(QsTransmission)) {
+			// 
+			Weight = saturate(-dot(NForward, L)) * Btdf / fmaxf((PdfTransmission * QsTransmission * QsGlass),FloatEpsilon);
+			ASSERT_VALID(Weight);
 		}
 		else {
 			// 反射
 			Weight = saturate(dot(NForward, L)) * Brdf / (PdfReflect * QsReflect* QsGlass);
+			ASSERT_VALID(Weight);
 		}
 		RayDirection = L;
 	}
@@ -189,14 +182,15 @@ __device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, flo
 		float QsReflect = 1 - QsDiffuse;
 		// 根据概率选择漫射或反射
 		float3 L;
-		if (NoiseSeq[1] < QsDiffuse) {
+		if (NoiseSeq[1] < SAFETY_MARGIN(QsDiffuse)) {
 			L = ImportanceSampleCosWeight(make_float2(NoiseSeq[2], NoiseSeq[3]), NForward);
 			float PdfDiffuse = saturate(dot(NForward, L)) * REVERSE_PI;
 			float3 BrdfDiffuse = DiffuseBrdf(surfaceData);
-			Weight = saturate(dot(NForward, L)) * BrdfDiffuse / (PdfDiffuse * QsDiffuse * QsDielectric);
+			Weight = saturate(dot(NForward, L)) * BrdfDiffuse / fmaxf((PdfDiffuse * QsDiffuse * QsDielectric), FloatEpsilon);
+			ASSERT_VALID(Weight);
 		}
 		else {
-			float3 H = ImportanceSampleGGX(make_float2(NoiseSeq[4], NoiseSeq[5]), nullptr, surfaceData.Roughness);
+			float3 H = ImportanceSampleGGX(make_float2(NoiseSeq[4], NoiseSeq[5]), surfaceData.Roughness);
 			float3 T, B;
 			{
 				GetTBNFromN(surfaceData.Normal, T, B);
@@ -206,12 +200,12 @@ __device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, flo
 			float3 HForward = InSurface ? H : -H;
 			L = normalize(2 * dot(HForward, V) * HForward - V);
 			float PdfM = DistributionGGX(saturate(dot(NForward, HForward)), surfaceData.Roughness) * abs(dot(NForward, HForward));
-			float JacobReflect = 1 / (4 * abs(dot(HForward, L)));
+			float JacobReflect = 1 / fmaxf(4 * abs(dot(HForward, L)),FloatEpsilon);
 			float PdfReflect = PdfM * JacobReflect;
 			float3 BrdfSpecular = SpecularBrdf(surfaceData, NForward, HForward, V, L, EtaI, EtaO);
-			Weight = saturate(dot(NForward, L)) * BrdfSpecular / (PdfReflect * QsReflect * QsDielectric);
+			Weight = saturate(dot(NForward, L)) * BrdfSpecular / fmaxf((PdfReflect * QsReflect * QsDielectric), FloatEpsilon);
+			ASSERT_VALID(Weight);
 		}
-		
 		RayDirection = L;
 	}
 	BxdfWeight = Weight;

@@ -18,12 +18,31 @@
 #define TEXTURE_FORMAT_FLOAT3 6
 #define TEXTURE_FORMAT_FLOAT4 7
 
+#define SAFETY_MARGIN(a)\
+	(a<0.5f? a-FloatEpsilon : a+FloatEpsilon)
+#define ENABLE_ASSERT
+#ifdef ENABLE_ASSERT
+#define ASSERT_VALID(a) \
+    if (isnan(a) || isinf(a)) { \
+        printf("Assertion failed at %s:%d: Input is NaN or Inf. ThreadId: %u, %u\n", __FILE__, __LINE__, optixGetLaunchIndex().x,optixGetLaunchIndex().y); \
+        assert(0); \
+    }
+#else
+#define ASSERT_VALID(a) (a)
+#endif
+__device__ bool isnan(float3 a) {
+	return isnan(a.x) || isnan(a.y) || isnan(a.z);
+}
+__device__ bool isinf(float3 a) {
+	return isinf(a.x) || isinf(a.y) || isinf(a.z);
+}
 typedef unsigned int uint;
 typedef unsigned long long uint64;
 typedef long long int64;
 typedef float float32;
 typedef double float64;
 static const float FloatOneMinusEpsilon = 0x1.fffffep-1;
+#define FloatEpsilon 1e-7
 
 enum LightType :uint {
 	Sphere = 0xFFFF0000,
@@ -468,28 +487,12 @@ static __device__ float Rand(uint& seed) {
 //		lerp(light.P4, light.P3, r1),
 //		r2);
 //}
-static __device__ float3 ImportanceSampleCosWeight(uint& Seed,float3 N) {
-	float phi = Rand(Seed);
-	float theta = Rand(Seed) * 2.0f * PI;
-	phi = asin(sqrt(phi));
-	float3 T;
-	if (N.x == 0 && N.z == 0) {
-		T = make_float3(0, N.z, -N.y);//x
-	}
-	else {
-		T = make_float3(N.z, 0, -N.x);//x
-	}
-	T = normalize(T);
-	float3 B = cross(N, T);//y
-	B = normalize(B);
-	float3 RayDir = T * sin(phi) * cos(theta) + B * sin(phi) * sin(theta) + N * saturate(cos(phi));
-	RayDir = normalize(RayDir);
-	return RayDir;
-}
+
 static __device__ float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
-	float phi = rand.x;
+	float p = rand.x;
 	float theta = rand.y * 2.0f * PI;
-	phi = asin(sqrt(phi));
+	float sin_phi = sqrt(p);
+	float cos_phi = sqrt(1-p);
 	float3 T;
 	if (abs(N.x)<1e-3f) {
 		T = make_float3(0, N.z, -N.y);//x
@@ -500,61 +503,39 @@ static __device__ float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
 	T = normalize(T);
 	float3 B = cross(N, T);//y
 	B = normalize(B);
-	float3 RayDir = T * sin(phi) * cos(theta) + B * sin(phi) * sin(theta) + N * saturate(cos(phi));
+	float3 RayDir = T * sin_phi * cos(theta) + B * sin_phi * sin(theta) + N * fmaxf(cos_phi,FloatEpsilon);
 	RayDir = normalize(RayDir);
 	return RayDir;
 }
-static __device__ float3 ImportanceSampleGGX(uint& Seed, float* Pdf, float roughness)
+static __device__ float3 ImportanceSampleCosWeight(uint& Seed, float3 N) {
+	float phi = Rand(Seed);
+	float theta = Rand(Seed);
+	return ImportanceSampleCosWeight(make_float2(phi, theta), N);
+}
+static __device__ float3 ImportanceSampleGGX(float2 Xi, float roughness)
 {
+	Xi.y = fminf(Xi.y, 0.99f);
 	float a = roughness * roughness;
+	float phi = 2.0 * PI * Xi.x;
+	float numerator = (1.0 - Xi.y);
+	float denominator = (1.0 + (a * a - 1.0) * Xi.y);
+	float cosTheta = sqrt(numerator / denominator);
+	ASSERT_VALID(cosTheta);
+	float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+	ASSERT_VALID(sinTheta);
+	// from spherical coordinates to cartesian coordinates
+	float3 H;
+	H.x = cos(phi) * sinTheta;
+	H.y = sin(phi) * sinTheta;
+	H.z = cosTheta;
+	return H;
+}
+static __device__ float3 ImportanceSampleGGX(uint& Seed, float roughness)
+{
 	float2 Xi;
 	Xi.x = Rand(Seed);
 	Xi.y = Rand(Seed);
-	float phi = 2.0 * PI * Xi.x;
-	float up = (1.0 - Xi.y) * 1000;
-	float down = (1.0 + (a * a - 1.0) * Xi.y) * 1000;
-	float cosTheta = sqrt(up / down);
-	float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-
-	// from spherical coordinates to cartesian coordinates
-	float3 H;
-	H.x = cos(phi) * sinTheta;
-	H.y = sin(phi) * sinTheta;
-	H.z = cosTheta;
-
-	// ¼ÆËãpdf_h : D * cos
-	if (Pdf) {
-		float d = (cosTheta * a - cosTheta) * cosTheta + 1;
-		float D = a / (PI * d * d);
-		Pdf[0] = D * cosTheta;
-	}
-	
-	return H;
-}
-static __device__ float3 ImportanceSampleGGX(float2 rnd, float* Pdf, float roughness)
-{
-	float a = roughness * roughness;
-	float2& Xi=rnd;
-	float phi = 2.0 * PI * Xi.x;
-	float up = (1.0 - Xi.y) * 1000;
-	float down = (1.0 + (a * a - 1.0) * Xi.y) * 1000;
-	float cosTheta = sqrt(up / down);
-	float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-
-	// from spherical coordinates to cartesian coordinates
-	float3 H;
-	H.x = cos(phi) * sinTheta;
-	H.y = sin(phi) * sinTheta;
-	H.z = cosTheta;
-
-	// ¼ÆËãpdf_h : D * cos
-	if (Pdf) {
-		float d = (cosTheta * a - cosTheta) * cosTheta + 1;
-		float D = a / (PI * d * d);
-		Pdf[0] = D * cosTheta;
-	}
-	
-	return H;
+	return ImportanceSampleGGX(Xi, roughness);
 }
 static __forceinline__ __device__ void GetTBNFromN(float3 N,float3& T,float3& B) {
 	if (N.x == 0 && N.z == 0) {
@@ -708,6 +689,7 @@ struct SurfaceData{
 			Metallic = ModelDataptr->MaterialData->Metallic;
 		}
 		BaseColor *= AO;
+		SpecularTint = 0;
 		Roughness = fmaxf(Roughness, 1e-3f);
 		Transmission = ModelDataptr->MaterialData->Transmission;
 		ior = ModelDataptr->MaterialData->Ior;

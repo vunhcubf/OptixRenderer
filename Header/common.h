@@ -131,7 +131,7 @@ inline void ResetMaterial(Material& mat) {
     mat.Emission = make_float3(0, 0, 0);
     mat.Roughness = 0.5f;
     mat.Metallic = 0.0f;
-    mat.Specular = 1.f;
+    mat.Specular = 1.0f;
     mat.Transmission = 0.0f;
     mat.Ior = 1.4f;
     mat.SpecularTint = 0.0f;

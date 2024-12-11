@@ -60,6 +60,9 @@ void main() {
 
 				// 编译选项，指定 GPU 架构
 				const char* opts[] = {
+					"--prec-sqrt=true",
+					"--prec-div=true",
+					"-ftz=false",
 					"--gpu-architecture=compute_89",
 					"-IC:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3/include",
 					"-IC:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0/include",
@@ -67,7 +70,7 @@ void main() {
 					"-ID:/OptixRenderer/ShaderLibrary",
 				};
 
-				nvrtcResult compileResult = nvrtcCompileProgram(prog, 5, opts);
+				nvrtcResult compileResult = nvrtcCompileProgram(prog, 8, opts);
 
 				// 检查编译错误
 				if (compileResult != NVRTC_SUCCESS) {
@@ -100,7 +103,7 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/furnance_test.png");
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/zwartkops_straight_morning_2k.png");
 		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
