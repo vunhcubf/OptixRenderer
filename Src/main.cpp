@@ -103,7 +103,7 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/zwartkops_straight_morning_2k.png");
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/furnance_test.png");
 		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
@@ -157,7 +157,7 @@ void main() {
 			}
 		}
 		SphereLight SphereLight1(
-			make_float3(0.077,0.115,1.1535), 0.3, make_float3(1,1,1),2);
+			make_float3(0.077,0.115,1.1535), 0.3, make_float3(1,1,1),20);
 		{
 			string name = "sphere_light1";
 			scene.AddProceduralObject(

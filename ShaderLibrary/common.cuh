@@ -689,7 +689,6 @@ struct SurfaceData{
 			Metallic = ModelDataptr->MaterialData->Metallic;
 		}
 		BaseColor *= AO;
-		SpecularTint = 0;
 		Roughness = fmaxf(Roughness, 1e-3f);
 		Transmission = ModelDataptr->MaterialData->Transmission;
 		ior = ModelDataptr->MaterialData->Ior;

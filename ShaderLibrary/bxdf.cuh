@@ -81,7 +81,7 @@ static __device__ float3 SpecularBrdf(SurfaceData& surfaceData,
 	float Ds = DistributionGGX(HForward, NForward, surfaceData.Roughness);
 	//ÕÚ±ÎÏî
 	float Gs = Smith_G(NForward, HForward, V, L, surfaceData.Roughness);
-	float3 brdf= lerp(Fs, fs, surfaceData.Transmission) * Gs * Ds / fmaxf(abs(4 * dot(NForward, V) * dot(NForward, L)), FloatEpsilon);
+	float3 brdf= lerp(fs, Fs, surfaceData.Metallic) * Gs * Ds / fmaxf(abs(4 * dot(NForward, V) * dot(NForward, L)), FloatEpsilon);
 	ASSERT_VALID(brdf);
 	return brdf;
 }
