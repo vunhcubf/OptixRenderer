@@ -157,7 +157,7 @@ void main() {
 			}
 		}
 		SphereLight SphereLight1(
-			make_float3(0.077,0.115,1.1535), 0.3, make_float3(1,1,1),20);
+			make_float3(0.077,0.115,0.8), 0.3, make_float3(1,1,1),20);
 		{
 			string name = "sphere_light1";
 			scene.AddProceduralObject(

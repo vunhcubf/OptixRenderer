@@ -103,7 +103,7 @@ static __device__ float3 TransmissionBtdf(SurfaceData& surfaceData,
 	ASSERT_VALID(numerator / fmaxf(denominator, FloatEpsilon));
 	return (surfaceData.Transmission) * (1 - surfaceData.Metallic)*numerator / fmaxf(denominator, FloatEpsilon);
 }
-__device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, float3& RayDirection, float3& BxdfWeight, bool TraceGlass) {
+__device__ void Princ1ipledBsdf(uint RecursionDepth, SurfaceData surfaceData, float3& RayDirection, float3& BxdfWeight, bool TraceGlass) {
 	// 原理话bsdf包含brdf和btdf
 	uint3 Id = optixGetLaunchIndex();
 	float QsGlass = (1 - surfaceData.Metallic) * surfaceData.Transmission;
@@ -206,6 +206,59 @@ __device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, flo
 			Weight = saturate(dot(NForward, L)) * BrdfSpecular / fmaxf((PdfReflect * QsReflect * QsDielectric), FloatEpsilon);
 			ASSERT_VALID(Weight);
 		}
+		RayDirection = L;
+	}
+	BxdfWeight = Weight;
+}
+__device__ void PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData, float3& RayDirection, float3& BxdfWeight,bool IsTransmission) {
+	// 原理话bsdf包含brdf和btdf
+	uint3 Id = optixGetLaunchIndex();
+	float3 Noise3 = hash33(make_uint3(Id.x, Id.y,
+		RayTracingGlobalParams.FrameNumber * RayTracingGlobalParams.MaxRecursionDepth + RecursionDepth),
+		1103515245U);
+	float3 V = normalize(-RayDirection);
+	bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
+	float EtaI = InSurface ? 1 : surfaceData.ior;
+	float EtaO = InSurface ? surfaceData.ior : 1;
+	// 与射线方向同向的法线
+	float3 NForward = InSurface ? surfaceData.Normal : -surfaceData.Normal;
+	float Pdf;
+	float3 Weight;
+
+	float3 HForward = ImportanceSampleGGX(make_float2(Noise3.x, Noise3.y), surfaceData.Roughness, NForward);
+	float QReflect = 1;
+	float QDiffuse = (1 - surfaceData.Metallic) * (1 - surfaceData.Transmission);
+	float QTransmission = (1 - surfaceData.Metallic) * surfaceData.Transmission * (1 - DielectricFresnel(HForward, V, EtaI, EtaO));
+	float QSum = QReflect + QDiffuse + QTransmission;
+	QReflect /= QSum;
+	QTransmission /= QSum;
+	QDiffuse /= QSum;
+
+	float PdfM = DistributionGGX(HForward, NForward, surfaceData.Roughness) * abs(dot(HForward, NForward));
+	if (Noise3.z < SAFETY_MARGIN(QTransmission)) {
+		float3 L = refract(-V, HForward, EtaI / EtaO, nullptr);
+		float JacobTransmission = EtaO * EtaO * abs(dot(L, HForward)) / pow2(EtaI * dot(V, HForward) + EtaO * dot(L, HForward));
+		float PdfTransmission = PdfM * JacobTransmission;
+		float3 Btdf = TransmissionBtdf(surfaceData, NForward, HForward, V, L, EtaO, EtaI);
+		Weight = saturate(-dot(NForward, L)) * Btdf / fmaxf((PdfTransmission * QTransmission), FloatEpsilon);
+		ASSERT_VALID(Weight);
+		RayDirection = L;
+	}
+	else if(Noise3.z < SAFETY_MARGIN(QTransmission+QReflect)){
+		float3 L = normalize(2 * dot(HForward, V) * HForward - V);
+		float JacobReflect = 1 / fmaxf(4 * abs(dot(HForward, L)), FloatEpsilon);
+		float PdfReflect = PdfM * JacobReflect;
+		float3 BrdfSpecular = SpecularBrdf(surfaceData, NForward, HForward, V, L, EtaI, EtaO);
+		Weight = saturate(dot(NForward, L)) * BrdfSpecular / fmaxf(PdfReflect * QReflect, FloatEpsilon);
+		ASSERT_VALID(Weight);
+		RayDirection = L;
+	}
+	else {
+		float3 L = ImportanceSampleCosWeight(make_float2(Noise3.x,Noise3.y), NForward);
+		float PdfDiffuse = saturate(dot(NForward, L)) * REVERSE_PI;
+		float3 BrdfDiffuse = DiffuseBrdf(surfaceData);
+		Weight = saturate(dot(NForward, L)) * BrdfDiffuse / fmaxf(PdfDiffuse * QDiffuse, FloatEpsilon);
+		ASSERT_VALID(Weight);
 		RayDirection = L;
 	}
 	BxdfWeight = Weight;

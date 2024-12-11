@@ -69,6 +69,17 @@ enum SurfaceType : uint {
 	Miss = 0x2,
 	ProceduralObject = 0x3
 };
+static __forceinline__ __device__ void GetTBNFromN(float3 N, float3& T, float3& B) {
+	if (N.x == 0 && N.z == 0) {
+		T = make_float3(0, N.z, -N.y);//x
+	}
+	else {
+		T = make_float3(N.z, 0, -N.x);//x
+	}
+	T = normalize(T);
+	B = cross(N, T);//y
+	B = normalize(B);
+}
 __device__ __forceinline__ uint3 operator>>(uint3 x,uint i){
 	return make_uint3(x.x>>i,x.y>>i,x.z>>i);
 }
@@ -537,17 +548,17 @@ static __device__ float3 ImportanceSampleGGX(uint& Seed, float roughness)
 	Xi.y = Rand(Seed);
 	return ImportanceSampleGGX(Xi, roughness);
 }
-static __forceinline__ __device__ void GetTBNFromN(float3 N,float3& T,float3& B) {
-	if (N.x == 0 && N.z == 0) {
-		T = make_float3(0, N.z, -N.y);//x
+static __device__ float3 ImportanceSampleGGX(float2 noise, float roughness, float3 N) {
+	float3 H = ImportanceSampleGGX(noise, roughness);
+	float3 T, B;
+	{
+		GetTBNFromN(N, T, B);
+		H = T * H.x + B * H.y + N * H.z;
+		H = normalize(H);
+		return H;
 	}
-	else {
-		T = make_float3(N.z, 0, -N.x);//x
-	}
-	T = normalize(T);
-	B = cross(N, T);//y
-	B = normalize(B);
 }
+
 static __device__ float3 ClmapRayDir(const float3& n, float3 l) {
 	float3 T, B, L;
 	GetTBNFromN(n, T, B);

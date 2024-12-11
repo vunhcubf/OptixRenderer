@@ -17,5 +17,5 @@ extern "C" __global__ void AccumulateFrame(uint PixelCount, uint64 FrameCounter,
 	}
 	
 	AccumulateBuffer[Idx] = AccumulatedColor / (FrameCounter + 1);
-	OutputSRGBBuffer[Idx] = make_color((AccumulatedColor / (FrameCounter + 1)));
+	OutputSRGBBuffer[Idx] = make_color(ACESFilm(AccumulatedColor / (FrameCounter + 1)));
 }
