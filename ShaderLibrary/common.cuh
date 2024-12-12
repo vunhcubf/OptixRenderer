@@ -700,7 +700,7 @@ struct SurfaceData{
 			Metallic = ModelDataptr->MaterialData->Metallic;
 		}
 		BaseColor *= AO;
-		Roughness = fmaxf(Roughness, 1e-3f);
+		Roughness = fmaxf(Roughness, 5e-3f);// 更低的阈值不能通过熔炉测试
 		Transmission = ModelDataptr->MaterialData->Transmission;
 		ior = ModelDataptr->MaterialData->Ior;
 		ior = fmaxf(ior, 1.0001f);
