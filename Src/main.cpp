@@ -103,7 +103,7 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/furnance_test.png");
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/black.png");
 		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
@@ -114,7 +114,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 10;
+		conf.MaxRayRecursiveDepth = 2;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -157,7 +157,7 @@ void main() {
 			}
 		}
 		SphereLight SphereLight1(
-			make_float3(0.077,0.115,0.8), 0.3, make_float3(1,1,1),20);
+			make_float3(0,0,1), 0.04, make_float3(1,1,1),200);
 		{
 			string name = "sphere_light1";
 			scene.AddProceduralObject(

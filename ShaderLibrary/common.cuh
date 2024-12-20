@@ -548,6 +548,12 @@ static __device__ float3 ImportanceSampleGGX(uint& Seed, float roughness)
 	Xi.y = Rand(Seed);
 	return ImportanceSampleGGX(Xi, roughness);
 }
+__device__ float3 LocalToWorld(float3 H,float3 N) {
+	float3 T, B;
+	GetTBNFromN(N, T, B);
+	H = T * H.x + B * H.y + N * H.z;
+	return H;
+}
 static __device__ float3 ImportanceSampleGGX(float2 noise, float roughness, float3 N) {
 	float3 H = ImportanceSampleGGX(noise, roughness);
 	float3 T, B;
@@ -617,6 +623,14 @@ static __device__ float RndUniform(){
 		threadid,&state);
 	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
 	return curand_uniform(&state);
+}
+__device__ __forceinline__ float UintAsFloat(uint a) {
+	//return (reinterpret_cast<float*>(&a))[0];
+	return __uint_as_float(a);
+}
+__device__ __forceinline__ uint FloatAsUint(float a) {
+	//return (reinterpret_cast<uint*>(&a)[0]);
+	return __float_as_uint(a);
 }
 struct SurfaceData{
 	float3 Normal;
@@ -700,7 +714,7 @@ struct SurfaceData{
 			Metallic = ModelDataptr->MaterialData->Metallic;
 		}
 		BaseColor *= AO;
-		Roughness = fmaxf(Roughness, 5e-3f);// 更低的阈值不能通过熔炉测试
+		Roughness = fmaxf(Roughness, 1e-2f);// 更低的阈值不能通过熔炉测试
 		Transmission = ModelDataptr->MaterialData->Transmission;
 		ior = ModelDataptr->MaterialData->Ior;
 		ior = fmaxf(ior, 1.0001f);
@@ -710,6 +724,7 @@ struct SurfaceData{
 			NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
 			Normal = UseNormalMap(Normal, NormalMap, 1.0f);
 		}
+		Roughness = fmaxf(Roughness, 1e-1f);
 #if defined Furnance_test
 		BaseColor = make_float3(1, 1, 1);
 #endif
@@ -723,4 +738,16 @@ __device__  __forceinline__ T* GetSbtDataPointer() {
 template<typename T>
 __device__  __forceinline__ T* GetSbtDataPointer(CUdeviceptr d) {
 	return (T*)d;
+}
+
+__device__ float3 GetSkyBoxColor(CUdeviceptr dataptr,float3 RayDirection) {
+	MissData* data = (MissData*)dataptr;
+	float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
+	if (IsTextureViewValid(data->SkyBox)) {
+		float4 skybox = SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
+		return make_float3(skybox.x, skybox.y, skybox.z);
+	}
+	else {
+		return data->BackgroundColor * data->SkyBoxIntensity;
+	}
 }
