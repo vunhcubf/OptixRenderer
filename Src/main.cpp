@@ -103,7 +103,7 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/zwartkops_straight_morning_2k.png");
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/black.png");
 		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
@@ -129,7 +129,9 @@ void main() {
 
 		scene.AddHitShader("HitGroup_fetchHitInfo", "module_disney_principled", "__closesthit__fetch_hitinfo", "", "");
 
-		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_sphere_light", "module_disney_principled", "__closesthit__sphere_light", "", "__intersection__sphere_light");
+		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_sphere_light", "module_disney_principled", "__closesthit__light", "", "__intersection__sphere_light");
+
+		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_rectangle_light", "module_disney_principled", "__closesthit__light", "", "__intersection__rectangle_light");
 		{
 			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
 			for (const auto& one : cornel) {
@@ -156,14 +158,26 @@ void main() {
 				scene.AddObjects(desc, name);
 			}
 		}
-		SphereLight SphereLight1(
-			make_float3(0,0,1), 0.2, make_float3(1,1,1),20);
+		//SphereLight SphereLight1(
+		//	make_float3(-8.2,-2.76,0.562), 0.2, make_float3(1,0.3,0.3),20);
+		//{
+		//	string name = "sphere_light1";
+		//	scene.AddProceduralObject(
+		//		name, SphereLight1.GetAabb(), 
+		//		SphereLight1.PackMaterialBuffer(), 
+		//		{"HitGroup_fetchHitInfo_proceduralgeo_sphere_light"},true);
+		//}
+
+		RectangleLight rectangleLight1(make_float3(0.29, -0.29, 1.3),
+			make_float3(-0.29, -0.29, 1.3),
+			make_float3(0.29, 0.29, 1.3),
+			make_float3(-0.29, 0.29, 1.3), make_float3(1, 1, 1), 20);
 		{
-			string name = "sphere_light1";
+			string name = "rectangle_light1";
 			scene.AddProceduralObject(
-				name, SphereLight1.GetAabb(), 
-				SphereLight1.PackMaterialBuffer(), 
-				{"HitGroup_fetchHitInfo_proceduralgeo_sphere_light"},true);
+				name, rectangleLight1.GetAabb(),
+				rectangleLight1.PackMaterialBuffer(),
+				{ "HitGroup_fetchHitInfo_proceduralgeo_rectangle_light" }, true);
 		}
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });

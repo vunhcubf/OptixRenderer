@@ -33,7 +33,7 @@ __device__ void TraceRay(
     p3=__float_as_uint(payload.TriangleCentroidCoord.x);
     p4=__float_as_uint(payload.TriangleCentroidCoord.y);
     p5=payload.surfaceType;
-    optixTrace(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
+    optixTrace(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, TMAX, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
         SBTOffset, SBTStride, MissSBTIndex,
         p0,p1,p2,p3,p4,p5);
     payload.PrimitiveID=p0;

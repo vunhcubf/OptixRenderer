@@ -18,6 +18,10 @@
 #define TEXTURE_FORMAT_FLOAT3 6
 #define TEXTURE_FORMAT_FLOAT4 7
 
+#define TMAX 1e16f
+#define TMIN 1e-3f
+#define FLOAT_NAN (__uint_as_float(0x7fc00000))
+
 #define SAFETY_MARGIN(a)\
 	(a<0.5f? a-FloatEpsilon : a+FloatEpsilon)
 #define ENABLE_ASSERT
@@ -46,7 +50,7 @@ static const float FloatOneMinusEpsilon = 0x1.fffffep-1;
 
 enum LightType :uint {
 	Sphere = 0xFFFF0000,
-	Area = 0xFFFF0001,
+	Rectangle = 0xFFFF0001,
 	Directional = 0xFFFF0002
 };
 
@@ -476,24 +480,6 @@ static __device__ float Rand(uint& seed) {
 	seed += 0xFC879023U;
 	return rnd(seed1);
 }
-//static __device__ float3 RandomSamplePointOnLight(uint& Seed) {
-//	float r1 = Rand(Seed);
-//	float r2 = Rand(Seed);
-//	AreaLight light = RayTracingGlobalParams.areaLight;
-//	return lerp(
-//		lerp(light.P1, light.P2, r1),
-//		lerp(light.P4, light.P3, r1),
-//		r2);
-//}
-//static __device__ float3 RandomSamplePointOnLight(float2 rand) {
-//	float r1 = rand.x;
-//	float r2 = rand.y;
-//	AreaLight light = RayTracingGlobalParams.areaLight;
-//	return lerp(
-//		lerp(light.P1, light.P2, r1),
-//		lerp(light.P4, light.P3, r1),
-//		r2);
-//}
 
 static __device__ float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
 	float p = rand.x;
@@ -750,3 +736,4 @@ __device__ float3 GetSkyBoxColor(CUdeviceptr dataptr,float3 RayDirection) {
 		return data->BackgroundColor * data->SkyBoxIntensity;
 	}
 }
+

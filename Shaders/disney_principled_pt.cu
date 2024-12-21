@@ -33,7 +33,7 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 
 	// 首先发射primary ray
 	HitInfo hitInfo;
-	TraceRay(hitInfo,RayOrigin, RayDirection,1e-3f, 0, 1, 0);
+	TraceRay(hitInfo,RayOrigin, RayDirection, TMIN, 0, 1, 0);
 	if(hitInfo.surfaceType==Miss){
 		RayTracingGlobalParams.IndirectOutputBuffer[pixel_id]=GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection);
 		return;
@@ -65,27 +65,22 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		bool useMIS = true;
 		if (surfaceData.Transmission < 1e-3f && useMIS) {
 			// 直接光
-			float3 Color, LightCenter;
-			float Radius;
-			float* sphereLightData = FetchLightData(0U);
-			
-			SphereLight::DecodeSphereLight(sphereLightData, LightCenter, Radius, Color);
-			float4 SampleResult = SphereLight::SampleAndGetPdf(sphereLightData, Noise14.x, Noise14.y, surfaceData.Position);
+			float4 SampleResult = SampleLight(0U, Noise14.x, Noise14.y, surfaceData.Position);
 			float3 SamplePoint = make_float3(SampleResult.x, SampleResult.y, SampleResult.z);
 			float3 RayDirDirectLight = normalize(SamplePoint - surfaceData.Position);
 			float pdfSphereLight = SampleResult.w;
 			// 只有不是折射时进行NEE
 			HitInfo hitInfoDirectLight;
-			TraceRay(hitInfoDirectLight, surfaceData.Position, RayDirDirectLight, 1e-3f, 0, 1, 0);
+			TraceRay(hitInfoDirectLight, surfaceData.Position, RayDirDirectLight, TMIN, 0, 1, 0);
 
 			// shadow ray命中灯光
 			IsShadowRayHitLight = true;
-			float3 lightColor = hitInfoDirectLight.surfaceType == SurfaceType::Light ? Color : make_float3(0.0f);
+			float3 lightColor = hitInfoDirectLight.surfaceType == SurfaceType::Light ? GetColorFromAnyLight(0U) : make_float3(0.0f);
 			float3 BrdfDirect = EvalBsdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
 
 			// 进行MIS f为Brdf采样， g为光源采样, X为Brdf样本，Y为光源样本
 			float Pf_X = EvalPdf(surfaceData, V, RayDirection, false, normalize(V + RayDirection));
-			float Pg_X = SphereLight::PdfSphereLight(surfaceData.Position,LightCenter,Radius,RayDirection);
+			float Pg_X = PdfLight(0U, surfaceData.Position, RayDirection);
 			// Wf
 			MISWeightCache.x = Pf_X / (Pf_X + Pg_X);
 			// Wg
@@ -103,7 +98,7 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		}
 		Weight *= BxdfWeight;
 		// 立即追踪bxdf光线
-		TraceRay(hitInfo, surfaceData.Position, RayDirection, 1e-3f, 0, 1, 0);
+		TraceRay(hitInfo, surfaceData.Position, RayDirection, TMIN, 0, 1, 0);
 
 		// 判断是否miss
 		if (hitInfo.surfaceType == Miss) {
@@ -145,6 +140,7 @@ extern "C" __global__ void __miss__fetchMissInfo()
 	SetPayLoad(hitInfo);
 }
 
+
 extern "C" __global__ void __intersection__sphere_light() {
     float3 ray_origin = optixGetWorldRayOrigin();
     float3 ray_direction = optixGetWorldRayDirection();
@@ -157,30 +153,26 @@ extern "C" __global__ void __intersection__sphere_light() {
 	pos.y = FetchLightData(data)[6];
 	pos.z = FetchLightData(data)[7];
 	radius = FetchLightData(data)[8];
-    float3 sphere_center = pos;
-    float sphere_radius = radius;
-    float3 oc = ray_origin - sphere_center;
-    float A = dot(ray_direction, ray_direction); 
-    float B = 2.0f * dot(oc, ray_direction); 
-    float C = dot(oc, oc) - sphere_radius * sphere_radius; 
-    float discriminant = B * B - 4.0f * A * C;
-    if (discriminant > 0.0f) {
-        float sqrt_discriminant = sqrtf(discriminant);
-        float t1 = (-B - sqrt_discriminant) / (2.0f * A);
-        float t2 = (-B + sqrt_discriminant) / (2.0f * A);
-        float t = tmax;  
-        if (t1 > tmin && t1 < tmax) {
-            t = t1;
-        }
-        if (t2 > tmin && t2 < tmax && t2 < t) {
-            t = t2; 
-        }
-        if (t > tmin && t < tmax) {
-            optixReportIntersection(t, 0); 
-        }
-    }
+	float t = RayIntersectWithSphere(ray_origin, pos, ray_direction, radius, optixGetRayTmin(), optixGetRayTmax());
+	if (!isnan(t)) {
+		optixReportIntersection(t, 0);
+	}
 }
-extern "C" __global__ void __closesthit__sphere_light(){
+extern "C" __global__ void __intersection__rectangle_light() {
+	float3 ray_origin = optixGetWorldRayOrigin();
+	float3 ray_direction = optixGetWorldRayDirection();
+	float tmin = optixGetRayTmin();
+	float tmax = optixGetRayTmax();
+	ProceduralGeometryMaterialBuffer* data = GetSbtDataPointer<ProceduralGeometryMaterialBuffer>();
+	float3 p1, p2, p3, p4;
+	float3 color;
+	RectangleLight::DecodeRectangleLight(data->Elements,p1, p2, p3, p4, color);
+	float t = RayIntersectWithRectangle(ray_origin, ray_direction, p1, p2, p3, p4, optixGetRayTmin(), optixGetRayTmax());
+	if (!isnan(t)) {
+		optixReportIntersection(t, 0);
+	}
+}
+extern "C" __global__ void __closesthit__light(){
 	HitInfo hitInfo;
 	hitInfo.PrimitiveID= 0;
 	hitInfo.SbtDataPtr=((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;
