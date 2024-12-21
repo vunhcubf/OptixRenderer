@@ -19,7 +19,18 @@ __device__ __host__ float3 float3_divide(const float3& a, const float3& b) {
 __device__ __host__ float3 float3_scale(const float3& a, const float& b) {
     return make_float3(a.x * b, a.y * b, a.z * b);
 }
-
+float3 operator+(float3 a, float3 b) {
+    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+float3 operator-(float3 a, float3 b) {
+    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+float3 operator/(float3 a, float3 b) {
+    return make_float3(a.x / b.x, a.y / b.y, a.z / b.z);
+}
+float3 operator*(float3 a, float3 b) {
+    return make_float3(a.x * b.x, a.y * b.y, a.z * b.z);
+}
 __device__ __host__ float3 CrossProduct(float3 a, float3 b)
 {
     float x = a.y * b.z - a.z * b.y;

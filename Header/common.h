@@ -69,10 +69,6 @@ enum MaterialType {
     MATERIAL_OBJ
 };
 
-struct AreaLight {
-    float3 P1, P2, P3, P4, Color;//p1,p2,p3,p4从下面看顺时针一圈
-    float Area;
-};
 
 struct CameraData {
     float3                 cam_eye;
@@ -320,3 +316,8 @@ inline std::string getParentDir(std::string path) {
 }
 const uint default_width = 1024;
 const uint default_height = 1024;
+
+float3 operator+(float3 a, float3 b);
+float3 operator-(float3 a, float3 b);
+float3 operator/(float3 a, float3 b);
+float3 operator*(float3 a, float3 b);

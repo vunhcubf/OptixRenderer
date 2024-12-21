@@ -35,15 +35,7 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 	HitInfo hitInfo;
 	TraceRay(hitInfo,RayOrigin, RayDirection,1e-3f, 0, 1, 0);
 	if(hitInfo.surfaceType==Miss){
-		MissData* data = (MissData*)hitInfo.SbtDataPtr;
-		float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
-		if (IsTextureViewValid(data->SkyBox)) {
-			float4 skybox = SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
-			RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = make_float3(skybox.x, skybox.y, skybox.z);
-		}
-		else {
-			RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = data->BackgroundColor * data->SkyBoxIntensity;
-		}
+		RayTracingGlobalParams.IndirectOutputBuffer[pixel_id]=GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection);
 		return;
 	}
 	else if(hitInfo.surfaceType==Light){
@@ -76,10 +68,11 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 			float3 Color, LightCenter;
 			float Radius;
 			float* sphereLightData = FetchLightData(0U);
-			DecodeSphereLight(sphereLightData, LightCenter, Radius, Color);
-			float3 SamplePoint;
-			float4 SampleResult = SampleSphereLight(Noise14.x, Noise14.y, surfaceData.Position, LightCenter, Radius, SamplePoint);
-			float3 RayDirDirectLight = make_float3(SampleResult.x, SampleResult.y, SampleResult.z);
+			
+			SphereLight::DecodeSphereLight(sphereLightData, LightCenter, Radius, Color);
+			float4 SampleResult = SphereLight::SampleAndGetPdf(sphereLightData, Noise14.x, Noise14.y, surfaceData.Position);
+			float3 SamplePoint = make_float3(SampleResult.x, SampleResult.y, SampleResult.z);
+			float3 RayDirDirectLight = normalize(SamplePoint - surfaceData.Position);
 			float pdfSphereLight = SampleResult.w;
 			// 只有不是折射时进行NEE
 			HitInfo hitInfoDirectLight;
@@ -92,7 +85,7 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 
 			// 进行MIS f为Brdf采样， g为光源采样, X为Brdf样本，Y为光源样本
 			float Pf_X = EvalPdf(surfaceData, V, RayDirection, false, normalize(V + RayDirection));
-			float Pg_X = PdfSphereLight(surfaceData.Position,LightCenter,Radius,RayDirection);
+			float Pg_X = SphereLight::PdfSphereLight(surfaceData.Position,LightCenter,Radius,RayDirection);
 			// Wf
 			MISWeightCache.x = Pf_X / (Pf_X + Pg_X);
 			// Wg

@@ -168,10 +168,6 @@ __device__ uint64 combineToUint64(uint high4Bytes, uint low4Bytes) {
 __device__ uint getHigh4Bytes(uint64 value) {
     return (uint)((value >> 32) & 0xFFFFFFFF);
 }
-struct AreaLight {
-    float3 P1, P2, P3, P4, Color;//p1,p2,p3,p4从下面看顺时针一圈
-    float Area;
-};
 
 struct CameraData {
     float3                 cam_eye;
@@ -624,12 +620,16 @@ static __device__ float RndUniform(){
 	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
 	return curand_uniform(&state);
 }
-__device__ __forceinline__ float UintAsFloat(uint a) {
-	//return (reinterpret_cast<float*>(&a))[0];
+__device__ __forceinline__ float UintAsFloat(uint& a) {
 	return __uint_as_float(a);
 }
-__device__ __forceinline__ uint FloatAsUint(float a) {
-	//return (reinterpret_cast<uint*>(&a)[0]);
+__device__ __forceinline__ uint FloatAsUint(float& a) {
+	return __float_as_uint(a);
+}
+__device__ __forceinline__ float UintAsFloat(uint&& a) {
+	return __uint_as_float(a);
+}
+__device__ __forceinline__ uint FloatAsUint(float&& a) {
 	return __float_as_uint(a);
 }
 struct SurfaceData{
@@ -714,7 +714,7 @@ struct SurfaceData{
 			Metallic = ModelDataptr->MaterialData->Metallic;
 		}
 		BaseColor *= AO;
-		Roughness = fmaxf(Roughness, 1e-2f);// 更低的阈值不能通过熔炉测试
+		Roughness = fmaxf(Roughness, 5e-2f);// 更低的阈值不能通过熔炉测试
 		Transmission = ModelDataptr->MaterialData->Transmission;
 		ior = ModelDataptr->MaterialData->Ior;
 		ior = fmaxf(ior, 1.0001f);
@@ -724,7 +724,6 @@ struct SurfaceData{
 			NormalMap = make_float3(tmp.x, tmp.y, tmp.z);
 			Normal = UseNormalMap(Normal, NormalMap, 1.0f);
 		}
-		Roughness = fmaxf(Roughness, 1e-1f);
 #if defined Furnance_test
 		BaseColor = make_float3(1, 1, 1);
 #endif
