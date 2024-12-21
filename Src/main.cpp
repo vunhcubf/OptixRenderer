@@ -114,7 +114,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 2;
+		conf.MaxRayRecursiveDepth = 10;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -157,7 +157,7 @@ void main() {
 			}
 		}
 		SphereLight SphereLight1(
-			make_float3(0,0,1), 0.04, make_float3(1,1,1),200);
+			make_float3(0,0,1), 0.2, make_float3(1,1,1),20);
 		{
 			string name = "sphere_light1";
 			scene.AddProceduralObject(
@@ -170,7 +170,7 @@ void main() {
 		scene.ConfigureRGSbt({ 1.0f,0.0f,1.0f });
 		scene.BuildSceneWithProceduralGeometrySupported();
 		LightManager::GetInstance().UploadLightList();
-		MyCamera camera(make_float3(0, -5.0f, 0), make_float2(M_PI * 0.5, M_PI / 2));
+		MyCamera camera(make_float3(0,-5,0), make_float2(M_PI * 0.5, M_PI / 2));
 		CameraData cameraData = camera.ExportCameraData(default_width, default_height);
 
 		int prev_width = default_width;

@@ -21,7 +21,7 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 	ComputeRayWithJitter(idx, dim, RayOrigin, RayDirection, jitter);
 
 	float3 Weight=make_float3(1.0f);
-	float3 Radience=make_float3(0.0f);
+	float3 Radiance=make_float3(0.0f);
 	// 缓存每次追踪的直接辐照度，如果下一次间接反弹没有命中灯光，就直接叠加，如果下一次命中灯光，就进行MIS混合
 	float2 MISWeightCache = make_float2(0);// x是Wf y是Wg
 	bool IsShadowRayHitLight = false;
@@ -53,31 +53,10 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = LightColor;
 		return;
 	}
+	float3 DebugColor=make_float3(1,0,1);
 	for(;RecursionDepth<RayTracingGlobalParams.MaxRecursionDepth;RecursionDepth++){
 		// 这次的着色点由上一次追踪给出
-		// 判断是否miss
-		if(hitInfo.surfaceType==Miss){
-			Radience += Weight * GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection);
-			Radience += RadianceDirectCache;
-			break;
-		}
-		else if(hitInfo.surfaceType==Light){
-			// 递归中，除了阴影射线之外的射线命中灯光
-			ProceduralGeometryMaterialBuffer* proceduralMatPtr = GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr);
-			float3 LightColor = GetColorFromAnyLight(FetchLightData(proceduralMatPtr));
-			if (IsShadowRayHitLight) {
-				// 进行MIS混合
-				Radience+=RadianceDirectCache*MISWeightCache.y+ MISWeightCache.x*Weight * LightColor;
-			}
-			else {
-				Radience += Weight * LightColor;
-			}
-			break;
-		}
-		// 如果上次ShadowRay命中了灯光，而间接反弹没有命中，就直接叠加
-		if (IsShadowRayHitLight) {
-			Radience += RadianceDirectCache;
-		}
+		
 		// 加载命中点
 		SurfaceData surfaceData;
 		surfaceData.Clear();
@@ -91,7 +70,8 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		float3 V = normalize(-RayDirection);
 		RayDirection=PrincipledBsdf(RecursionDepth, surfaceData,make_float3(Noise4.x, Noise4.y, Noise4.z),V , BxdfWeight, IsTransmission);
 
-		if (surfaceData.Transmission < 1e-3f) {
+		bool useMIS = true;
+		if (surfaceData.Transmission < 1e-3f && useMIS) {
 			// 直接光
 			float3 Color, LightCenter;
 			float Radius;
@@ -104,50 +84,53 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 			// 只有不是折射时进行NEE
 			HitInfo hitInfoDirectLight;
 			TraceRay(hitInfoDirectLight, surfaceData.Position, RayDirDirectLight, 1e-3f, 0, 1, 0);
-			if (hitInfoDirectLight.surfaceType != SurfaceType::Light) {
-				Weight *= BxdfWeight;
-				IsShadowRayHitLight = false;
-				MISWeightCache.x = 1.0f;
-				MISWeightCache.y = 0.0f;
-				RadianceDirectCache = make_float3(0);
-			}
-			else {
-				// shadow ray命中灯光
-				IsShadowRayHitLight = true;
-				float3 lightColor = hitInfoDirectLight.surfaceType == SurfaceType::Light ? Color : make_float3(0.0f);
-				float3 BrdfDirect = EvalBsdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
 
-				// 进行MIS f为Brdf采样， g为光源采样, X为Brdf样本，Y为光源样本
-				float Pf_X = EvalPdf(surfaceData, V, RayDirection, false, normalize(V + RayDirection));
-				float Pg_X = PdfSphereLight(surfaceData.Position,LightCenter,Radius,RayDirection);
-				// Wf
-				MISWeightCache.x = Pf_X / (Pf_X + Pg_X);
-				// Wg
-				float Pg_Y = pdfSphereLight;
-				float Pf_Y = EvalPdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
-				MISWeightCache.y = Pg_Y / (Pf_Y + Pg_Y);
-				RadianceDirectCache = Weight * lightColor * BrdfDirect / Pg_Y;
-				if (optixGetLaunchIndex().x == 600 && optixGetLaunchIndex().y == 600) {
-					printf("luminance %f,\t%f,\t%f\n", RadianceDirectCache.x, RadianceDirectCache.y, RadianceDirectCache.z);
-					printf("brdf %f,\t%f,\t%f\n", BrdfDirect.x, BrdfDirect.y, BrdfDirect.z);
-					printf("pdf %f\n", Pg_Y);
-					printf("weight %f,\t%f,\t%f\n", Weight.x, Weight.y, Weight.z);
-					printf("\n");
-				}
-				Weight *= BxdfWeight;
-			}
+			// shadow ray命中灯光
+			IsShadowRayHitLight = true;
+			float3 lightColor = hitInfoDirectLight.surfaceType == SurfaceType::Light ? Color : make_float3(0.0f);
+			float3 BrdfDirect = EvalBsdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
+
+			// 进行MIS f为Brdf采样， g为光源采样, X为Brdf样本，Y为光源样本
+			float Pf_X = EvalPdf(surfaceData, V, RayDirection, false, normalize(V + RayDirection));
+			float Pg_X = PdfSphereLight(surfaceData.Position,LightCenter,Radius,RayDirection);
+			// Wf
+			MISWeightCache.x = Pf_X / (Pf_X + Pg_X);
+			// Wg
+			float Pg_Y = pdfSphereLight;
+			float Pf_Y = EvalPdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
+			MISWeightCache.y = Pg_Y / (Pf_Y + Pg_Y);
+			RadianceDirectCache = Weight * lightColor * BrdfDirect / Pg_Y;
+			
 		}
 		else {
-			Weight *= BxdfWeight;
 			MISWeightCache.x = 1.0f;
 			MISWeightCache.y = 0.0f;
 			IsShadowRayHitLight = false;
 			RadianceDirectCache = make_float3(0);
 		}
+		Weight *= BxdfWeight;
 		// 立即追踪bxdf光线
 		TraceRay(hitInfo, surfaceData.Position, RayDirection, 1e-3f, 0, 1, 0);
+
+		// 判断是否miss
+		if (hitInfo.surfaceType == Miss) {
+			Radiance += Weight * GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection);
+			Radiance += RadianceDirectCache;
+			break;
+		}
+		else if (hitInfo.surfaceType == Light) {
+			// 递归中，除了阴影射线之外的射线命中灯光
+			ProceduralGeometryMaterialBuffer* proceduralMatPtr = GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr);
+			float3 LightColor = GetColorFromAnyLight(FetchLightData(proceduralMatPtr));
+			Radiance += RadianceDirectCache * MISWeightCache.y + MISWeightCache.x * Weight * LightColor;
+			break;
+		}
+		// 如果上次ShadowRay命中了灯光，而间接反弹没有命中，就直接叠加
+		if (IsShadowRayHitLight) {
+			Radiance += RadianceDirectCache;
+		}
 	}
-	RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] =  Radience;
+	RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = Radiance;
 }
 
 extern "C" __global__ void __closesthit__fetch_hitinfo() {
