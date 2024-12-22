@@ -74,7 +74,7 @@ enum SurfaceType : uint {
 	ProceduralObject = 0x3
 };
 static __forceinline__ __device__ void GetTBNFromN(float3 N, float3& T, float3& B) {
-	if (N.x == 0 && N.z == 0) {
+	if (abs(N.x)<1e-7f) {
 		T = make_float3(0, N.z, -N.y);//x
 	}
 	else {
@@ -507,7 +507,7 @@ static __device__ float3 ImportanceSampleCosWeight(uint& Seed, float3 N) {
 }
 static __device__ float3 ImportanceSampleGGX(float2 Xi, float roughness)
 {
-	Xi.y = fminf(Xi.y, 0.99f);
+	Xi.y = fminf(Xi.y, 0.999999f);
 	float a = roughness * roughness;
 	float phi = 2.0 * PI * Xi.x;
 	float numerator = (1.0 - Xi.y);

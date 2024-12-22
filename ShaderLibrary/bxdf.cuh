@@ -154,17 +154,17 @@ __device__ float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool
 		else {
 			L = ImportanceSampleCosWeight(make_float2(noise.x, noise.y), NForward);
 		}
-		if (length(V + L) < FloatEpsilon) {
-			float3 d;
-			if (abs(L.x) < 1e-4f) {
-				d = normalize(make_float3(0, L.z, -L.y));
-			}
-			else {
-				d = normalize(make_float3(L.z, 0, -L.x));
-			}
-			L += d * 1e-3f;
-			L = normalize(L);
-		}
+		//if (length(V + L) < FloatEpsilon) {
+		//	float3 d;
+		//	if (abs(L.x) < 1e-4f) {
+		//		d = normalize(make_float3(0, L.z, -L.y));
+		//	}
+		//	else {
+		//		d = normalize(make_float3(L.z, 0, -L.x));
+		//	}
+		//	L += d * 1e-3f;
+		//	L = normalize(L);
+		//}
 		H = normalize(V + L);
 		return L;
 	}

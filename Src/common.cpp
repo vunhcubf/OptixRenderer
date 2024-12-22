@@ -28,8 +28,22 @@ float3 operator-(float3 a, float3 b) {
 float3 operator/(float3 a, float3 b) {
     return make_float3(a.x / b.x, a.y / b.y, a.z / b.z);
 }
+float3 operator/(float a, float3 b) {
+    return make_float3(a / b.x, a / b.y, a / b.z);
+}
+float3 operator/(float3 a, float b) {
+    return make_float3(a.x / b, a.y / b, a.z / b);
+}
 float3 operator*(float3 a, float3 b) {
     return make_float3(a.x * b.x, a.y * b.y, a.z * b.z);
+}
+float3 operator*(float3 a, float b)
+{
+    return make_float3(a.x * b, a.y * b, a.z * b);
+}
+float3 operator*(float a, float3 b)
+{
+    return make_float3(b.x * a, b.y * a, b.z * a);
 }
 __device__ __host__ float3 CrossProduct(float3 a, float3 b)
 {

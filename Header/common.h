@@ -320,4 +320,8 @@ const uint default_height = 1024;
 float3 operator+(float3 a, float3 b);
 float3 operator-(float3 a, float3 b);
 float3 operator/(float3 a, float3 b);
+float3 operator/(float a, float3 b);
+float3 operator/(float3 a, float b);
 float3 operator*(float3 a, float3 b);
+float3 operator*(float3 a, float b);
+float3 operator*(float a, float3 b);
