@@ -60,21 +60,22 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 		float3 BxdfWeight;
 		float3 V = normalize(-RayDirection);
 		RayDirection=PrincipledBsdf(RecursionDepth, surfaceData,make_float3(Noise4.x, Noise4.y, Noise4.z),V , BxdfWeight, IsTransmission);
-		uint LightToSample = floor(RayTracingGlobalParams.LightListLength * Noise14.z);
+		uint LightToSample = floor(RayTracingGlobalParams.LightListLength * clamp(Noise14.z,1e-6f,1.0f-1e-6f));
 		LightToSample = min(LightToSample, RayTracingGlobalParams.LightListLength - 1);
 
+		
 		if (surfaceData.Transmission < 1e-3f) {
 			// 直接光
 			float4 SampleResult = SampleLight(LightToSample, Noise14.x, Noise14.y, surfaceData.Position);
 			float3 SamplePoint = make_float3(SampleResult.x, SampleResult.y, SampleResult.z);
 			float3 RayDirDirectLight = normalize(SamplePoint - surfaceData.Position);
-			float pdfSphereLight = SampleResult.w/ RayTracingGlobalParams.LightListLength;
+			float pdflight = SampleResult.w/ RayTracingGlobalParams.LightListLength;
 			// 只有不是折射时进行NEE
 			HitInfo hitInfoDirectLight;
 			TraceRay(hitInfoDirectLight, surfaceData.Position, RayDirDirectLight, TMIN, 0, 1, 0);
 
 			// shadow ray命中灯光
-			float3 lightColor = hitInfoDirectLight.surfaceType == SurfaceType::Light ? GetColorFromAnyLight(LightToSample) : make_float3(0.0f);
+			float3 lightColor = hitInfoDirectLight.surfaceType == SurfaceType::Light && FetchLightIndex(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfoDirectLight.SbtDataPtr)) == LightToSample ? GetColorFromAnyLight(LightToSample) : make_float3(0.0f);
 			float3 BrdfDirect = EvalBsdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
 
 			// 进行MIS f为Brdf采样， g为光源采样, X为Brdf样本，Y为光源样本
@@ -83,11 +84,10 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 			// Wf
 			MISWeightCache.x = Pf_X / (Pf_X + Pg_X);
 			// Wg
-			float Pg_Y = pdfSphereLight;
+			float Pg_Y = pdflight;
 			float Pf_Y = EvalPdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
 			MISWeightCache.y = Pg_Y / (Pf_Y + Pg_Y);
 			RadianceDirectCache = Weight * lightColor * BrdfDirect / Pg_Y;
-			
 		}
 		else {
 			MISWeightCache.x = 1.0f;
@@ -95,34 +95,25 @@ extern "C" __global__ void __raygen__principled_bsdf(){
 			RadianceDirectCache = make_float3(0);
 		}
 		Weight *= BxdfWeight;
+		Weight *= MISWeightCache.x;
 		// 立即追踪bxdf光线
 		TraceRay(hitInfo, surfaceData.Position, RayDirection, TMIN, 0, 1, 0);
 
 		// 判断是否miss
-		if (hitInfo.surfaceType == Miss) {
+		if (hitInfo.surfaceType == SurfaceType::Miss) {
 			Radiance += Weight * GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection);
 			Radiance += RadianceDirectCache;
 			break;
 		}
-		else if (hitInfo.surfaceType == Light) {
-			
-			if (FetchLightIndex(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr)) == LightToSample) {
-				// 递归中，除了阴影射线之外的射线命中灯光
-				ProceduralGeometryMaterialBuffer* proceduralMatPtr = GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr);
-				float3 LightColor = GetColorFromAnyLight(FetchLightData(proceduralMatPtr));
-				Radiance += RadianceDirectCache * MISWeightCache.y + MISWeightCache.x * Weight * LightColor;
-				break;
-			}
-			else {
-				ProceduralGeometryMaterialBuffer* proceduralMatPtr = GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr);
-				float3 LightColor = GetColorFromAnyLight(FetchLightData(proceduralMatPtr));
-				Radiance += RadianceDirectCache+  Weight * LightColor;
-				break;
-			}
+		else if (hitInfo.surfaceType == SurfaceType::Light && FetchLightIndex(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr)) == LightToSample) {
+			ProceduralGeometryMaterialBuffer* proceduralMatPtr = GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr);
+			float3 LightColor = GetColorFromAnyLight(FetchLightData(proceduralMatPtr));
+			Radiance += RadianceDirectCache * MISWeightCache.y + MISWeightCache.x * Weight * LightColor;
+			DebugColor = Radiance;
+			break;
 		}
 		// 如果上次ShadowRay命中了灯光，而间接反弹没有命中，就直接叠加
 		Radiance += RadianceDirectCache;
-		
 	}
 	RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = Radiance;
 }
@@ -132,7 +123,7 @@ extern "C" __global__ void __closesthit__fetch_hitinfo() {
 	hitInfo.PrimitiveID=optixGetPrimitiveIndex();
 	hitInfo.SbtDataPtr=((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;
 	hitInfo.TriangleCentroidCoord=optixGetTriangleBarycentrics();
-	hitInfo.surfaceType=((ModelData*)hitInfo.SbtDataPtr)->MaterialData->MaterialType==MaterialType::MATERIAL_OBJ ? Opaque:Light;
+	hitInfo.surfaceType=((ModelData*)hitInfo.SbtDataPtr)->MaterialData->MaterialType==MaterialType::MATERIAL_OBJ ? Opaque: Opaque;
 	SetPayLoad(hitInfo);
 }
 

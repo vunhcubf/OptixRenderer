@@ -114,7 +114,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 1;
+		conf.MaxRayRecursiveDepth = 10;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -159,15 +159,7 @@ void main() {
 			}
 		}
 		
-		{
-			SphereLight SphereLight1(
-				make_float3(-8.2, -2.76, 0.562), 0.05, make_float3(1, 0.3, 0.3), 200);
-			string name = "sphere_light1";
-			scene.AddProceduralObject(
-				name, SphereLight1.GetAabb(), 
-				SphereLight1.PackMaterialBuffer(), 
-				{"HitGroup_fetchHitInfo_proceduralgeo_sphere_light"},true);
-		}
+
 		
 		{
 			float3 corner = make_float3(0.05, 0.05, 1.3);
@@ -175,12 +167,21 @@ void main() {
 				make_float3(1, -1, 1)* corner,
 				make_float3(-1, 1, 1)* corner,
 				make_float3(-1, -1, 1)* corner,
-				make_float3(1, 1, 1), 20);
+				make_float3(1, 1, 1), 200);
 			string name = "rectangle_light1";
 			scene.AddProceduralObject(
 				name, rectangleLight1.GetAabb(),
 				rectangleLight1.PackMaterialBuffer(),
 				{ "HitGroup_fetchHitInfo_proceduralgeo_rectangle_light" }, true);
+		}
+		{
+			SphereLight SphereLight1(
+				make_float3(-8.2, -2.76, 0.562), 0.05, make_float3(1, 0.3, 0.3), 200);
+			string name = "sphere_light1";
+			scene.AddProceduralObject(
+				name, SphereLight1.GetAabb(),
+				SphereLight1.PackMaterialBuffer(),
+				{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
 		}
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
