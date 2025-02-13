@@ -1,10 +1,10 @@
 #pragma once
 #include "common.cuh"
-static __forceinline__ __device__ float3 fresnelSchlick(float cosTheta, float3 F0)
+static INLINE DEVICE float3 fresnelSchlick(float cosTheta, float3 F0)
 {
 	return F0 + (1.0 - F0) * Pow5(saturate(1.0 - cosTheta));
 }
-static __forceinline__ __device__ float DielectricFresnel(float3 HForward, float3 V, float EtaI, float EtaO) {
+static INLINE DEVICE float DielectricFresnel(float3 HForward, float3 V, float EtaI, float EtaO) {
 	float fs;
 	{
 		float c = abs(dot(V, HForward));
@@ -21,18 +21,18 @@ static __forceinline__ __device__ float DielectricFresnel(float3 HForward, float
 	}
 	return fs;
 }
-static __forceinline__ __device__ float Disney_FD90(float roughness, float3 H, float3 L) {
+static INLINE DEVICE float Disney_FD90(float roughness, float3 H, float3 L) {
 	float HoL = abs(dot(H, L));
 	return 0.5 + 2 * roughness * HoL * HoL;
 }
-static __forceinline__ __device__ float Disney_FD(float FD90, float3 N, float3 W) {
+static INLINE DEVICE float Disney_FD(float FD90, float3 N, float3 W) {
 	return 1 + (FD90 - 1) * (1 - Pow5(abs(dot(N, W))));
 }
-static __forceinline__ __device__ float Y(float3 color) {
+static INLINE DEVICE float Y(float3 color) {
 	return 0.2126 * color.x + 0.7152 * color.y + 0.0722 * color.z;
 }
 
-static __forceinline__ __device__ float DistributionGGX(float NdotH, float roughness)
+static INLINE DEVICE float DistributionGGX(float NdotH, float roughness)
 {
 	float a = roughness* roughness;
 	if (NdotH < 0.01f) {
@@ -61,11 +61,11 @@ static __forceinline__ __device__ float DistributionGGX(float NdotH, float rough
 	ASSERT_VALID(num / fmaxf(denom, FloatEpsilon));
 	return num / fmaxf(denom, FloatEpsilon);
 }
-static __forceinline__ __device__ float DistributionGGX(float3 N, float3 H, float roughness)
+static INLINE DEVICE float DistributionGGX(float3 N, float3 H, float roughness)
 {
 	return DistributionGGX(dot(N, H), roughness);
 }
-static __forceinline__ __device__ float SmithG1(float3 wm, float3 v, float alpha) {
+static INLINE DEVICE float SmithG1(float3 wm, float3 v, float alpha) {
 	float cosTheta = dot(wm, v);
 	float sinTheta = saturate(sqrt(1 - cosTheta * cosTheta));
 	float tanTheta = abs(sinTheta / cosTheta);
@@ -76,14 +76,14 @@ static __forceinline__ __device__ float SmithG1(float3 wm, float3 v, float alpha
 	float root = alpha * tanTheta;
 	return 2.0f / (1.0f + sqrt(1.0f + root * root));
 }
-static __forceinline__ __device__ float Smith_G(float3 n,float3 m, float3 v, float3 l, float roughness) {
+static INLINE DEVICE float Smith_G(float3 n,float3 m, float3 v, float3 l, float roughness) {
 	float a = roughness * roughness;
 	if (dot(v, m) * dot(v, n) < 0.0f || dot(l, m) * dot(l, n) < 0.0f) {
 		return 0.0f;
 	}
 	return SmithG1(m, v, a) * SmithG1(m, l, a);
 }
-static __device__ float3 SpecularBrdf(SurfaceData& surfaceData,
+static DEVICE float3 SpecularBrdf(SurfaceData& surfaceData,
 	float3 NForward, float3 HForward, float3 V, float3 L,float EtaI,float EtaO) {
 	if (!(dot(NForward, V) > 0.0f && dot(NForward, L) > 0.0f)) {
 		return make_float3(0);
@@ -102,13 +102,13 @@ static __device__ float3 SpecularBrdf(SurfaceData& surfaceData,
 	ASSERT_VALID(brdf);
 	return brdf;
 }
-static __device__ float3 DiffuseBrdf(SurfaceData& data) {
+static DEVICE float3 DiffuseBrdf(SurfaceData& data) {
 	//首先计算漫反射
 	float3 DiffuseTerm;
 	DiffuseTerm = data.BaseColor * REVERSE_PI;
 	return (1 - data.Transmission) * (1 - data.Metallic) * DiffuseTerm;
 }
-static __device__ float3 TransmissionBtdf(SurfaceData& surfaceData,
+static DEVICE float3 TransmissionBtdf(SurfaceData& surfaceData,
 	float3 NForward, float3 HForward, float3 V, float3 L,float EtaO,float EtaI) {
 	if (!(dot(NForward, V) > 0.0f && dot(NForward, L) < 0.0f)) {
 		return make_float3(0);
@@ -124,7 +124,7 @@ static __device__ float3 TransmissionBtdf(SurfaceData& surfaceData,
 	return (surfaceData.Transmission) * (1 - surfaceData.Metallic)*numerator / fmaxf(denominator, FloatEpsilon);
 }
 
-__device__ float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& IsTransmission,float3& H) {
+DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& IsTransmission,float3& H) {
 	bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
@@ -169,7 +169,7 @@ __device__ float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool
 		return L;
 	}
 }
-__device__ float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmission,float3 HForward) {
+DEVICE float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmission,float3 HForward) {
 	bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
@@ -199,7 +199,7 @@ __device__ float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTra
 	}
 }
 
-__device__ float3 EvalBsdf(SurfaceData& surfaceData, float3 V, float3 L, bool IsTransmission, float3 HForward) {
+DEVICE float3 EvalBsdf(SurfaceData& surfaceData, float3 V, float3 L, bool IsTransmission, float3 HForward) {
 	bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
@@ -222,7 +222,7 @@ __device__ float3 EvalBsdf(SurfaceData& surfaceData, float3 V, float3 L, bool Is
 	}
 }
 
-__device__ float3 PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData,float3 Noise3, float3 V, float3& BxdfWeight, bool& IsTransmission) {
+DEVICE float3 PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData,float3 Noise3, float3 V, float3& BxdfWeight, bool& IsTransmission) {
 	float3 HForward;
 	float3 L = SampleBsdf(surfaceData, Noise3, V, IsTransmission, HForward);
 	float pdf = EvalPdf(surfaceData, V, L, IsTransmission, HForward);

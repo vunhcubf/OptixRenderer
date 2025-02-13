@@ -18,9 +18,27 @@
 #define TEXTURE_FORMAT_FLOAT3 6
 #define TEXTURE_FORMAT_FLOAT4 7
 
+#define IS_PIXEL(a,b) (optixGetLaunchIndex().x==a && optixGetLaunchIndex().y==b)
+
+
+
+#define GLOBAL __global__
+#define DEVICE __device__
+#define HOST __host__
+#define INLINE __forceinline__
+
+DEVICE INLINE float GetNaN() {
+	return (__uint_as_float(0x7fc00000));
+}
+DEVICE INLINE void Assert(bool x) {
+	assert(x);
+}
+
 #define TMAX 1e16f
 #define TMIN 1e-3f
-#define FLOAT_NAN (__uint_as_float(0x7fc00000))
+#define FLOAT_NAN GetNaN()
+
+
 
 #define SAFETY_MARGIN(a)\
 	(a<0.5f? a-FloatEpsilon : a+FloatEpsilon)
@@ -29,15 +47,15 @@
 #define ASSERT_VALID(a) \
     if (isnan(a) || isinf(a)) { \
         printf("Assertion failed at %s:%d: Input is NaN or Inf. ThreadId: %u, %u\n", __FILE__, __LINE__, optixGetLaunchIndex().x,optixGetLaunchIndex().y); \
-        assert(0); \
+        Assert(0); \
     }
 #else
 #define ASSERT_VALID(a) (a)
 #endif
-__device__ bool isnan(float3 a) {
+DEVICE bool isnan(float3 a) {
 	return isnan(a.x) || isnan(a.y) || isnan(a.z);
 }
-__device__ bool isinf(float3 a) {
+DEVICE bool isinf(float3 a) {
 	return isinf(a.x) || isinf(a.y) || isinf(a.z);
 }
 typedef unsigned int uint;
@@ -63,7 +81,7 @@ struct TextureView{
 	unsigned char textureFormat=0;
 	cudaTextureObject_t textureIdentifier=0;
 };
-static __device__ bool IsTextureViewValid(TextureView view){
+static DEVICE bool IsTextureViewValid(TextureView view){
 	return view.width!=0 && view.height!=0;
 }
 const float goldenRatioConjugate = 0.061803398875f;
@@ -73,7 +91,7 @@ enum SurfaceType : uint {
 	Miss = 0x2,
 	ProceduralObject = 0x3
 };
-static __forceinline__ __device__ void GetTBNFromN(float3 N, float3& T, float3& B) {
+static INLINE DEVICE void GetTBNFromN(float3 N, float3& T, float3& B) {
 	if (abs(N.x)<1e-7f) {
 		T = make_float3(0, N.z, -N.y);//x
 	}
@@ -84,26 +102,26 @@ static __forceinline__ __device__ void GetTBNFromN(float3 N, float3& T, float3& 
 	B = cross(N, T);//y
 	B = normalize(B);
 }
-__device__ __forceinline__ uint3 operator>>(uint3 x,uint i){
+DEVICE INLINE uint3 operator>>(uint3 x,uint i){
 	return make_uint3(x.x>>i,x.y>>i,x.z>>i);
 }
-__device__ __forceinline__ uint3 operator^(uint3 a,uint3 b){
+DEVICE INLINE uint3 operator^(uint3 a,uint3 b){
 	return make_uint3(a.x^b.x,a.y^b.y,a.z^b.z);
 }
-__device__ __forceinline__ uint4 operator>>(uint4 x,uint i){
+DEVICE INLINE uint4 operator>>(uint4 x,uint i){
 	return make_uint4(x.x>>i,x.y>>i,x.z>>i,x.w>>i);
 }
-__device__ __forceinline__ uint4 operator^(uint4 a,uint4 b){
+DEVICE INLINE uint4 operator^(uint4 a,uint4 b){
 	return make_uint4(a.x^b.x,a.y^b.y,a.z^b.z,a.w^b.w);
 }
-__device__ __forceinline__ uint4 hash44i(uint4 x){
+DEVICE INLINE uint4 hash44i(uint4 x){
     x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.w,x.x)) * 0x45d9f3bu;
     x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.w,x.x)) * 0x45d9f3bu;
     x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.w,x.x)) * 0x45d9f3bu;
     x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.w,x.x)) * 0x45d9f3bu;
     return x;
 }
-__device__ __forceinline__ uint4 hash34i(uint3 x0){
+DEVICE INLINE uint4 hash34i(uint3 x0){
     uint4 x = make_uint4(x0.x,x0.y,x0.z,x0.z);
     x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.x,x.y)) * 0x45d9f3bu;
     x = ((x >> 16u) ^ make_uint4(x.y,x.z,x.x,x.z)) * 0x45d9f3bu;
@@ -111,18 +129,18 @@ __device__ __forceinline__ uint4 hash34i(uint3 x0){
     //x = (x >> 16u) ^ x;
     return x;
 }
-__device__ __forceinline__ float4 hash44(uint4 p){
+DEVICE INLINE float4 hash44(uint4 p){
     const float scale = pow(2., -32.);
     uint4 h = hash44i(p);
     return make_float4(h)*scale;
 }
 
-__device__ __forceinline__ float4 hash34(uint3 p){
+DEVICE INLINE float4 hash34(uint3 p){
     const float scale = 1.0/float(0xffffffffU);
     uint4 h = hash34i(uint3(p));
     return make_float4(h)*scale;
 }
-__device__ __forceinline__ float3 hash33( uint3 x )
+DEVICE INLINE float3 hash33( uint3 x )
 {
 	const uint k = 1103515245U;
     x = ((x>>8U)^make_uint3(x.y,x.z,x.x))*k;
@@ -131,7 +149,7 @@ __device__ __forceinline__ float3 hash33( uint3 x )
     
     return make_float3(x)*(1.0/float(0xffffffffU));
 }
-__device__ __forceinline__ float3 hash33( uint3 x,uint seed )
+DEVICE INLINE float3 hash33( uint3 x,uint seed )
 {
 	const uint& k = seed;
     x = ((x>>8U)^make_uint3(x.y,x.z,x.x))*k;
@@ -140,10 +158,10 @@ __device__ __forceinline__ float3 hash33( uint3 x,uint seed )
     
     return make_float3(x)*(1.0/float(0xffffffffU));
 }
-__device__ __forceinline__ float frac(float x){
+DEVICE INLINE float frac(float x){
 	return x-(int)x;
 }
-__device__ __forceinline__ float4 frac(float4 a){
+DEVICE INLINE float4 frac(float4 a){
 	return make_float4(frac(a.x),
 	frac(a.y),
 	frac(a.z),
@@ -162,14 +180,14 @@ enum MaterialType {
     MATERIAL_AREALIGHT,
     MATERIAL_OBJ
 };
-__device__ uint getLow4Bytes(uint64 value) {
+DEVICE uint getLow4Bytes(uint64 value) {
     return (uint)(value & 0xFFFFFFFF);
 }
-__device__ uint64 combineToUint64(uint high4Bytes, uint low4Bytes) {
+DEVICE uint64 combineToUint64(uint high4Bytes, uint low4Bytes) {
     return (((uint64)high4Bytes) << 32) | low4Bytes;
 }
 // 获取 uint64_t 的高 4 字节
-__device__ uint getHigh4Bytes(uint64 value) {
+DEVICE uint getHigh4Bytes(uint64 value) {
     return (uint)((value >> 32) & 0xFFFFFFFF);
 }
 
@@ -210,9 +228,9 @@ struct BlueNoiseMapBuffer{
     int height;
     int channel;
 	template<uint channels>
-	__device__ void Sample(uint2 pixel_id,void* result);
+	DEVICE void Sample(uint2 pixel_id,void* result);
 	template<>
-	__device__ void Sample<1>(uint2 pixel_id,void* result){
+	DEVICE void Sample<1>(uint2 pixel_id,void* result){
 		pixel_id.y=pixel_id.y%height;
 		pixel_id.x=pixel_id.x%width;
 		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
@@ -220,7 +238,7 @@ struct BlueNoiseMapBuffer{
 		res[0]=(Data[address_offset]/255.0f);
 	}
 	template<>
-	__device__ void Sample<2>(uint2 pixel_id,void* result){
+	DEVICE void Sample<2>(uint2 pixel_id,void* result){
 		pixel_id.y=pixel_id.y%height;
 		pixel_id.x=pixel_id.x%width;
 		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
@@ -229,7 +247,7 @@ struct BlueNoiseMapBuffer{
 		res->y=(Data[address_offset+1]/255.0f);
 	}
 	template<>
-	__device__ void Sample<3>(uint2 pixel_id,void* result){
+	DEVICE void Sample<3>(uint2 pixel_id,void* result){
 		pixel_id.y=pixel_id.y%height;
 		pixel_id.x=pixel_id.x%width;
 		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
@@ -239,7 +257,7 @@ struct BlueNoiseMapBuffer{
 		res->z=(Data[address_offset+2]/255.0f);
 	}
 	template<>
-	__device__ void Sample<4>(uint2 pixel_id,void* result){
+	DEVICE void Sample<4>(uint2 pixel_id,void* result){
 		pixel_id.y=pixel_id.y%height;
 		pixel_id.x=pixel_id.x%width;
 		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
@@ -249,25 +267,39 @@ struct BlueNoiseMapBuffer{
 		res->z=(Data[address_offset+2]/255.0f);
 		res->w=(Data[address_offset+3]/255.0f);
 	}
-	__device__ inline uint2 GetLoopSamplePixelId();
+	DEVICE inline uint2 GetLoopSamplePixelId();
+};
+enum class FrameAccumulationOptions :int {
+	ForceOn=0,
+	ForceOff=1,
+	Auto=2
+};
+enum class ConsoleDebugMode :int {
+	NoDebug = 0,
+	MIS = 1
+};
+struct ConsoleOptions {
+	ConsoleDebugMode debugMode;
+	FrameAccumulationOptions frameAccumulationOptions;
 };
 struct LaunchParameters {
-    float3* IndirectOutputBuffer;
-    uchar4* ImagePtr;
-    uint Width;
-    uint Height;
-    CameraData cameraData;
-    OptixTraversableHandle Handle;
-    uint Seed;
-    uint64 FrameNumber;
-    uint Spp;
-    uint MaxRecursionDepth;
-    // 随机数生成
-    uint64* PixelOffset;
+	float3* IndirectOutputBuffer;
+	uchar4* ImagePtr;
+	uint Width;
+	uint Height;
+	CameraData cameraData;
+	OptixTraversableHandle Handle;
+	uint Seed;
+	uint64 FrameNumber;
+	uint Spp;
+	uint MaxRecursionDepth;
+	uint64* PixelOffset;
 	BlueNoiseMapBuffer* BlueNoiseBuffer;
 	CUdeviceptr LightListArrayptr;
 	uint LightListLength;
+	ConsoleOptions* consoleOptions;
 };
+#define CONSOLE_OPTIONS (RayTracingGlobalParams.consoleOptions)
 
 //原理化BSDF
 // 现在使用texture view来描述纹理，但是不想改材质结构体的定义，把uint64当作指针吧
@@ -314,7 +346,7 @@ struct PerRayData {
 	uint RayHitType;
 	float3 DebugData;
 };
-__device__ inline uint2 BlueNoiseMapBuffer::GetLoopSamplePixelId(){
+DEVICE inline uint2 BlueNoiseMapBuffer::GetLoopSamplePixelId(){
 	uint3 id=optixGetLaunchIndex();
 	uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
 	uint64 pixeloffset=RayTracingGlobalParams.PixelOffset[threadid];
@@ -329,10 +361,10 @@ __device__ inline uint2 BlueNoiseMapBuffer::GetLoopSamplePixelId(){
 }
 #define SAMPLE_BLUENOISE_4D(x) RayTracingGlobalParams.BlueNoiseBuffer->Sample<4>(make_uint2(optixGetLaunchIndex().x,optixGetLaunchIndex().y),&x)
 template<typename T>
-static __forceinline__ __device__ T SampleTexture2DWithCompliationSpecification(TextureView tex, float u, float v) {
+static INLINE DEVICE T SampleTexture2DWithCompliationSpecification(TextureView tex, float u, float v) {
 	return tex2D<T>(tex.textureIdentifier, u, v);
 }
-static __forceinline__ __device__ float4 SampleTexture2DRuntimeSpecific(TextureView tex, float u, float v){
+static INLINE DEVICE float4 SampleTexture2DRuntimeSpecific(TextureView tex, float u, float v){
 	if(tex.textureFormat==TEXTURE_FORMAT_UCHAR1){
 		uchar1 r=SampleTexture2DWithCompliationSpecification<uchar1>(tex,u,v);
 		return make_float4(r.x/255.0, 0,0,0);
@@ -359,50 +391,50 @@ static __forceinline__ __device__ float4 SampleTexture2DRuntimeSpecific(TextureV
 	}
 	return make_float4(1,1,1,1);
 }
-static __forceinline__ __device__ float pow2(float a) {
+static INLINE DEVICE float pow2(float a) {
 	return a * a;
 }
-static __forceinline__ __device__ float3 sqrt(float3 a) {
+static INLINE DEVICE float3 sqrt(float3 a) {
 	return make_float3(sqrt(a.x), sqrt(a.y), sqrt(a.z));
 }
-static __forceinline__ __device__ float Pow4(float a) {
+static INLINE DEVICE float Pow4(float a) {
 	return a * a * a * a;
 }
-static __forceinline__ __device__ float2 abs(float2 a) {
+static INLINE DEVICE float2 abs(float2 a) {
 	return make_float2(abs(a.x), abs(a.y));
 }
-static __forceinline__ __device__ float3 abs(float3 a) {
+static INLINE DEVICE float3 abs(float3 a) {
 	return make_float3(abs(a.x), abs(a.y), abs(a.z));
 }
-static __forceinline__ __device__ float4 abs(float4 a) {
+static INLINE DEVICE float4 abs(float4 a) {
 	return make_float4(abs(a.x), abs(a.y), abs(a.z),abs(a.w));
 }
-static __forceinline__ __device__ float squared_length(float3 vec) {
+static INLINE DEVICE float squared_length(float3 vec) {
 	return dot(vec, vec);
 }
-static __forceinline__ __device__ float saturate(float a) {
+static INLINE DEVICE float saturate(float a) {
 	return clamp(a, 0.0f, 1.0f);
 }
-static __forceinline__ __device__ float3 saturate(float3 a) {
+static INLINE DEVICE float3 saturate(float3 a) {
 	return make_float3(saturate(a.x), saturate(a.y), saturate(a.z));
 }
-static __forceinline__ __device__ float Pow5(float a) {
+static INLINE DEVICE float Pow5(float a) {
 	return a * a * a * a * a;
 }
-static __forceinline__ __device__ float rcp(float a) {
+static INLINE DEVICE float rcp(float a) {
 	return 1 / a;
 }
-static __forceinline__ __device__ float3 min(float3 a, float3 b) {
+static INLINE DEVICE float3 min(float3 a, float3 b) {
 	return make_float3(fminf(a.x, b.x), fminf(a.y, b.y), fminf(a.z, b.z));
 }
 
-static __forceinline__ __device__ float lerp(float x1, float x2, float t) {
+static INLINE DEVICE float lerp(float x1, float x2, float t) {
 	return x1 * (1 - t) + t * x2;
 }
-static __forceinline__ __device__ float sign(float x) {
+static INLINE DEVICE float sign(float x) {
 	return x == 0.0f ? 0.0f : (x > 0.0f ? 1.0f : -1.0f);
 }
-static __device__ __forceinline__ float RadicalInverse_VdC(uint bits)
+static DEVICE INLINE float RadicalInverse_VdC(uint bits)
 {
 	bits = (bits << 16u) | (bits >> 16u);
 	bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
@@ -411,12 +443,12 @@ static __device__ __forceinline__ float RadicalInverse_VdC(uint bits)
 	bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
 	return float(bits) * 2.3283064365386963e-10; // / 0x100000000
 }
-static __device__ __forceinline__ float2 Hammersley(uint i, uint N)
+static DEVICE INLINE float2 Hammersley(uint i, uint N)
 {
 	return make_float2((float)i/(float)N, RadicalInverse_VdC(i));
 }
 
-static __device__ __forceinline__ float3 FilterGlossy(float3 In,float Threshold) {
+static DEVICE INLINE float3 FilterGlossy(float3 In,float Threshold) {
 	In = fmaxf(make_float3(0.0f), In);
 	if (isnan(In.x) || isnan(In.y) || isnan(In.z)) {
 		return make_float3(0.0f);
@@ -430,7 +462,7 @@ static __device__ __forceinline__ float3 FilterGlossy(float3 In,float Threshold)
 	}
 }
 // ior为折射介质 / 入射介质
-__device__ float3 refract(float3 I, float3 N, float3 M, float eta, bool* IsInternalReflection)
+DEVICE float3 refract(float3 I, float3 N, float3 M, float eta, bool* IsInternalReflection)
 {
 	if(IsInternalReflection)
 		*IsInternalReflection = false;
@@ -439,7 +471,7 @@ __device__ float3 refract(float3 I, float3 N, float3 M, float eta, bool* IsInter
 	return L;
 }
 
-static __host__ __device__ __inline__ uint lcg3(uint prev)
+static HOST DEVICE INLINE uint lcg3(uint prev)
 {
 	const uint LCG_A = 1664525u;
 	const uint LCG_C = 1013904223u;
@@ -447,7 +479,7 @@ static __host__ __device__ __inline__ uint lcg3(uint prev)
 	return prev;
 }
 
-static __host__ __device__ __inline__ uint lcg4(uint prev)
+static HOST DEVICE INLINE uint lcg4(uint prev)
 {
 	prev = (prev * 8121 + 28411) % 134456;
 	return prev;
@@ -456,7 +488,7 @@ static __host__ __device__ __inline__ uint lcg4(uint prev)
 #define PI 3.14159265358979f
 #define REVERSE_PI 0.318309886183791f
 
-static __forceinline__ __device__ float2 GetSkyBoxUv(float3 RayDir) {
+static INLINE DEVICE float2 GetSkyBoxUv(float3 RayDir) {
 	//首先获取垂直方向
 	float2 uv;
 	uv.y = acos(RayDir.z) / PI;
@@ -474,14 +506,14 @@ static __forceinline__ __device__ float2 GetSkyBoxUv(float3 RayDir) {
 }
 
 
-static __device__ float Rand(uint& seed) {
+static DEVICE float Rand(uint& seed) {
 	const uint3 id = optixGetLaunchIndex();
 	uint seed1 = tea<4>(id.y * RayTracingGlobalParams.Width + id.x, seed);
 	seed += 0xFC879023U;
 	return rnd(seed1);
 }
 
-static __device__ float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
+static DEVICE float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
 	float p = rand.x;
 	float theta = rand.y * 2.0f * PI;
 	float sin_phi = sqrt(p);
@@ -500,12 +532,12 @@ static __device__ float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
 	RayDir = normalize(RayDir);
 	return RayDir;
 }
-static __device__ float3 ImportanceSampleCosWeight(uint& Seed, float3 N) {
+static DEVICE float3 ImportanceSampleCosWeight(uint& Seed, float3 N) {
 	float phi = Rand(Seed);
 	float theta = Rand(Seed);
 	return ImportanceSampleCosWeight(make_float2(phi, theta), N);
 }
-static __device__ float3 ImportanceSampleGGX(float2 Xi, float roughness)
+static DEVICE float3 ImportanceSampleGGX(float2 Xi, float roughness)
 {
 	Xi.y = fminf(Xi.y, 0.999999f);
 	float a = roughness * roughness;
@@ -523,20 +555,20 @@ static __device__ float3 ImportanceSampleGGX(float2 Xi, float roughness)
 	H.z = cosTheta;
 	return H;
 }
-static __device__ float3 ImportanceSampleGGX(uint& Seed, float roughness)
+static DEVICE float3 ImportanceSampleGGX(uint& Seed, float roughness)
 {
 	float2 Xi;
 	Xi.x = Rand(Seed);
 	Xi.y = Rand(Seed);
 	return ImportanceSampleGGX(Xi, roughness);
 }
-__device__ float3 LocalToWorld(float3 H,float3 N) {
+DEVICE float3 LocalToWorld(float3 H,float3 N) {
 	float3 T, B;
 	GetTBNFromN(N, T, B);
 	H = T * H.x + B * H.y + N * H.z;
 	return H;
 }
-static __device__ float3 ImportanceSampleGGX(float2 noise, float roughness, float3 N) {
+static DEVICE float3 ImportanceSampleGGX(float2 noise, float roughness, float3 N) {
 	float3 H = ImportanceSampleGGX(noise, roughness);
 	float3 T, B;
 	{
@@ -547,7 +579,7 @@ static __device__ float3 ImportanceSampleGGX(float2 noise, float roughness, floa
 	}
 }
 
-static __device__ float3 ClmapRayDir(const float3& n, float3 l) {
+static DEVICE float3 ClmapRayDir(const float3& n, float3 l) {
 	float3 T, B, L;
 	GetTBNFromN(n, T, B);
 	L = make_float3(dot(T, l), dot(B, l), dot(n, l));
@@ -557,7 +589,7 @@ static __device__ float3 ClmapRayDir(const float3& n, float3 l) {
 	L = normalize(L);
 	return L;
 }
-static __forceinline__ __device__ float3 UseNormalMap(float3 N,float3 NormalMap,float Intensity) {
+static INLINE DEVICE float3 UseNormalMap(float3 N,float3 NormalMap,float Intensity) {
 	float3 T;
 	float3 BT;
 	if (abs(N.x) < 1e-4 && abs(N.z) < 1e-4) {
@@ -574,7 +606,7 @@ static __forceinline__ __device__ float3 UseNormalMap(float3 N,float3 NormalMap,
 	N = normalize(N);
 	return N;
 }
-static __device__ float3 refract(const float3 incident, const float3 normal, const float eta,bool* internal_reflection)
+static DEVICE float3 refract(const float3 incident, const float3 normal, const float eta,bool* internal_reflection)
 {
 	float k = 1.0f - eta * eta * (1.0f - dot(normal, incident) * dot(normal, incident));
 	if (k < 0.0f) {
@@ -586,17 +618,17 @@ static __device__ float3 refract(const float3 incident, const float3 normal, con
 	else
 		return eta * incident - (eta * dot(normal, incident) + sqrt(k)) * normal;
 }
-static __device__ void AccumulatePixelOffset(){
+static DEVICE void AccumulatePixelOffset(){
 	uint3 id=optixGetLaunchIndex();
     uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
 	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
 }
-static __device__ uint64 FetchPixelOffset(){
+static DEVICE uint64 FetchPixelOffset(){
 	uint3 id=optixGetLaunchIndex();
     uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
 	return RayTracingGlobalParams.PixelOffset[threadid];
 }
-static __device__ float RndUniform(){
+static DEVICE float RndUniform(){
 	uint3 id=optixGetLaunchIndex();
 	curandStateXORWOW_t state;
 	uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
@@ -606,16 +638,16 @@ static __device__ float RndUniform(){
 	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
 	return curand_uniform(&state);
 }
-__device__ __forceinline__ float UintAsFloat(uint& a) {
+DEVICE INLINE float UintAsFloat(uint& a) {
 	return __uint_as_float(a);
 }
-__device__ __forceinline__ uint FloatAsUint(float& a) {
+DEVICE INLINE uint FloatAsUint(float& a) {
 	return __float_as_uint(a);
 }
-__device__ __forceinline__ float UintAsFloat(uint&& a) {
+DEVICE INLINE float UintAsFloat(uint&& a) {
 	return __uint_as_float(a);
 }
-__device__ __forceinline__ uint FloatAsUint(float&& a) {
+DEVICE INLINE uint FloatAsUint(float&& a) {
 	return __float_as_uint(a);
 }
 struct SurfaceData{
@@ -633,7 +665,7 @@ struct SurfaceData{
 	float Transmission;
 	float ior;
 	SurfaceType HitType;
-	__device__ void Clear(){
+	DEVICE void Clear(){
 		Normal=make_float3(0.0f);
 		GeometryNormal=make_float3(0.0f);
 		Position=make_float3(0.0f);
@@ -648,7 +680,7 @@ struct SurfaceData{
 		Transmission=0.0f;
 		ior=0.0f;
 	}
-	__device__ void Load(HitInfo& hitInfo){
+	DEVICE void Load(HitInfo& hitInfo){
 		HitType=hitInfo.surfaceType;
 		if(HitType!=SurfaceType::Opaque){
 			return;
@@ -717,15 +749,15 @@ struct SurfaceData{
 };
 
 template<typename T>
-__device__  __forceinline__ T* GetSbtDataPointer() {
+DEVICE  INLINE T* GetSbtDataPointer() {
 	return (T*)(((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr);
 }
 template<typename T>
-__device__  __forceinline__ T* GetSbtDataPointer(CUdeviceptr d) {
+DEVICE  INLINE T* GetSbtDataPointer(CUdeviceptr d) {
 	return (T*)d;
 }
 
-__device__ float3 GetSkyBoxColor(CUdeviceptr dataptr,float3 RayDirection) {
+DEVICE float3 GetSkyBoxColor(CUdeviceptr dataptr,float3 RayDirection) {
 	MissData* data = (MissData*)dataptr;
 	float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
 	if (IsTextureViewValid(data->SkyBox)) {

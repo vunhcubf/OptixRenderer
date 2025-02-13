@@ -1,7 +1,7 @@
 #pragma once
 #include "common.cuh"
 
-__device__ void SetPayLoad(HitInfo& payload){
+DEVICE void SetPayLoad(HitInfo& payload){
     optixSetPayload_0(payload.PrimitiveID);
     optixSetPayload_1(getLow4Bytes(payload.SbtDataPtr));
     optixSetPayload_2(getHigh4Bytes(payload.SbtDataPtr));
@@ -10,7 +10,7 @@ __device__ void SetPayLoad(HitInfo& payload){
     optixSetPayload_5(payload.surfaceType);
 }
 
-__device__ void GetPayLoad(HitInfo& payload) {
+DEVICE void GetPayLoad(HitInfo& payload) {
     payload.PrimitiveID=optixGetPayload_0();
     payload.SbtDataPtr=combineToUint64(optixGetPayload_2(),optixGetPayload_1());
     payload.TriangleCentroidCoord.x=__uint_as_float(optixGetPayload_3());
@@ -18,7 +18,7 @@ __device__ void GetPayLoad(HitInfo& payload) {
     payload.surfaceType=(SurfaceType)optixGetPayload_5();
 }
 
-__device__ void TraceRay(
+DEVICE void TraceRay(
     HitInfo& payload,
     float3 RayOrigin,
     float3 RayDirection,

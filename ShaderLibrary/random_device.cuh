@@ -9,7 +9,7 @@ private:
     uint64* ScrambleConstant;
     uint* PixelOffset;
 public:
-    __device__ float RndUniform(){
+    DEVICE float RndUniform(){
         uint3 id=optixGetLaunchIndex();
         uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
         uint64 ThreadCount=RayTracingGlobalParams.Width*RayTracingGlobalParams.Height;

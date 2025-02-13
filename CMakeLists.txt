@@ -4,7 +4,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH};E:/vcpkg/vcpkg/packages/libdeflate_x64-windows)
 set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH};E:/vcpkg/vcpkg/packages/glfw3_x64-windows)
 file(GLOB CUDA_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.cu)
-file(GLOB CPP_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/Src/*.cpp)
+file(GLOB CPP_SOURCES1
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/imgui/*.cpp
+)
+set(CPP_SOURCES ${CPP_SOURCES1} ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/imgui/backends/imgui_impl_glfw.cpp ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/imgui/backends/imgui_impl_opengl3.cpp)
 file(GLOB HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/Header/*.h)
 
 find_package(CUDA REQUIRED)
@@ -24,6 +28,8 @@ include_directories(${OPTIX_PATH}/SDK)
 include_directories(${OPTIX_PATH}/SDK/support/glad)
 include_directories(${OPTIX_PATH}/SDK/support/GLFW/include/GLFW)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ShaderLibrary)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/imgui)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/imgui/backends)
 
 target_link_libraries(Main PRIVATE cudart)
 target_link_libraries(Main PRIVATE curand)

@@ -22,6 +22,9 @@
 #include "cuda.h"
 #include "cuda_runtime.h"
 
+#define DEVICE __device__
+#define HOST __host__
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC 
 #include "stb/include/stb_image.h"
@@ -54,7 +57,7 @@ struct SbtRecord
     __align__(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
     T data;
 };
-#define CURAND_CHECK(x) assert(x==CURAND_STATUS_SUCCESS)
+#define CURAND_CHECK(x) Assert(x==CURAND_STATUS_SUCCESS)
 #define M_PI 3.14159265358979f
 #define M_REVERSE_PI 0.318309886183791f
 struct HostMemStream {
@@ -171,6 +174,21 @@ public:
         stbi_image_free(hostdata);
     }
 };
+enum class FrameAccumulationOptions :int {
+    ForceOn = 0,
+    ForceOff = 1,
+    Auto = 2
+};
+extern const char* debugModeItems[];
+extern const char* frameAccumulationItems[];
+enum class ConsoleDebugMode :int {
+    NoDebug = 0,
+    MIS = 1
+};
+struct ConsoleOptions {
+    ConsoleDebugMode debugMode;
+    FrameAccumulationOptions frameAccumulationOptions;
+};
 struct LaunchParameters {
     float3* IndirectOutputBuffer;
     uchar4* ImagePtr;
@@ -182,11 +200,11 @@ struct LaunchParameters {
     uint64 FrameNumber;
     uint Spp;
     uint MaxRecursionDepth;
-    // 随机数生成
     uint64* PixelOffset;
-	BlueNoiseMapBuffer* BlueNoiseBuffer;
+    BlueNoiseMapBuffer* BlueNoiseBuffer;
     CUdeviceptr LightListArrayptr;
     uint LightListLength;
+    ConsoleOptions* consoleOptions;
 };
 struct ModelData {
     GeometryBuffer* GeometryData;
@@ -281,13 +299,13 @@ public:
 typedef UniquePtr<void, DEVICE_PTR> UniquePtrDevice;
 std::string ReadOptixir(std::string& path);
 
-__device__ __host__ float3 float3_add(const float3& a, const float3& b);
-__device__ __host__ float3 float3_minus(const float3& a, const float3& b);
-__device__ __host__ float3 float3_multiply(const float3& a, const float3& b);
-__device__ __host__ float3 float3_divide(const float3& a, const float3& b);
-__device__ __host__ float3 float3_scale(const float3& a, const float& b);
+DEVICE HOST float3 float3_add(const float3& a, const float3& b);
+DEVICE HOST float3 float3_minus(const float3& a, const float3& b);
+DEVICE HOST float3 float3_multiply(const float3& a, const float3& b);
+DEVICE HOST float3 float3_divide(const float3& a, const float3& b);
+DEVICE HOST float3 float3_scale(const float3& a, const float& b);
 
-__device__ __host__ float3 CrossProduct(float3 a, float3 b);
+DEVICE HOST float3 CrossProduct(float3 a, float3 b);
 
 inline void writeToFile(const std::string& filename, const std::string& content, bool append = false) {
     std::ofstream outFile;

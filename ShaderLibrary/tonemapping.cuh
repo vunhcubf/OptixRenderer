@@ -1,7 +1,7 @@
 #pragma once
 #include "common.cuh"
 
-static __device__ float3 ACESFilm(float3 x)
+static DEVICE float3 ACESFilm(float3 x)
 {
     float a = 2.51f;
     float b = 0.03f;

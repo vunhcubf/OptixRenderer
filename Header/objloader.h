@@ -374,4 +374,7 @@ inline ObjLoadResult LoadObj(string path) {
 
 		return res;
 	}
+	else {
+		throw std::runtime_error("打不开文件: " + path);
+	}
 }

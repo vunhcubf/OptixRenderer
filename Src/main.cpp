@@ -9,6 +9,22 @@
 #include <windows.h>
 #include "Light.h"
 
+#define GLFW_EXPOSE_NATIVE_WIN32
+#define GLFW_EXPOSE_NATIVE_WGL
+#define GLFW_NATIVE_INCLUDE_NONE
+#include < GLFW/glfw3native.h>
+
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+const char* debugModeItems[] = {
+	"NoDebug", "MIS"
+};
+const char* frameAccumulationItems[] = {
+	"ForceOn", "ForceOff", "Auto"
+};
+
+
 using namespace sutil;
 static const char* vertexShaderSource = "#version 330 core\n"
 "layout (location = 0) in vec2 aPos;\n"
@@ -30,6 +46,13 @@ static const char* fragmentShaderSource = "#version 330 core\n"
 "void main() {\n"
 "FragColor = texture(textureSampler, TexCoords);\n"
 "}\n\0";
+void disableMinimizeButton(GLFWwindow* window) {
+	HWND hwnd = glfwGetWin32Window(window); // 获取 Win32 窗口句柄
+	LONG style = GetWindowLong(hwnd, GWL_STYLE); // 获取当前窗口样式
+	style &= ~WS_MINIMIZEBOX; // 移除最小化按钮样式
+	SetWindowLong(hwnd, GWL_STYLE, style); // 应用新的样式
+	SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED); // 刷新窗口
+}
 void main() {
 	try {
 		string CUDAIncludePath = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3/include";
@@ -37,7 +60,7 @@ void main() {
 		string ProjectPath = getParentDir(getParentDir(getParentDir(getExecutablePath())));// 向前滚动两级别
 		string CompiledShaderPath = ProjectPath + "/CompiledShaders";
 		string ShaderPath = ProjectPath + "/Shaders";
-		string BlueNoiseMapPath = ProjectPath + "/Assets/Textures/stbn_vec3_2Dx1D_128x128x64_49.png";
+		string BlueNoiseMapPath = ProjectPath + "/Assets/Textures/black.png";
 		// 加载蓝噪声图
 		BlueNoiseMapBufferManager BlueNoise(BlueNoiseMapPath.c_str());
 		// 所有文件都编译
@@ -114,7 +137,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 10;
+		conf.MaxRayRecursiveDepth = 4;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -159,30 +182,28 @@ void main() {
 			}
 		}
 		
-
-		
 		{
-			float3 corner = make_float3(0.05, 0.05, 1.3);
+			float3 corner = make_float3(0.2, 0.2, 1.3);
 			RectangleLight rectangleLight1(make_float3(1, 1, 1)* corner,
 				make_float3(1, -1, 1)* corner,
 				make_float3(-1, 1, 1)* corner,
 				make_float3(-1, -1, 1)* corner,
-				make_float3(1, 1, 1), 200);
+				make_float3(1, 1, 1), 12);
 			string name = "rectangle_light1";
 			scene.AddProceduralObject(
 				name, rectangleLight1.GetAabb(),
 				rectangleLight1.PackMaterialBuffer(),
 				{ "HitGroup_fetchHitInfo_proceduralgeo_rectangle_light" }, true);
 		}
-		{
-			SphereLight SphereLight1(
-				make_float3(-8.2, -2.76, 0.562), 0.05, make_float3(1, 0.3, 0.3), 200);
-			string name = "sphere_light1";
-			scene.AddProceduralObject(
-				name, SphereLight1.GetAabb(),
-				SphereLight1.PackMaterialBuffer(),
-				{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
-		}
+		//{
+		//	SphereLight SphereLight1(
+		//		make_float3(-8.2, -2.76, 0.562), 0.05, make_float3(1, 0.3, 0.3), 200);
+		//	string name = "sphere_light1";
+		//	scene.AddProceduralObject(
+		//		name, SphereLight1.GetAabb(),
+		//		SphereLight1.PackMaterialBuffer(),
+		//		{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
+		//}
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
 		scene.ConfigureRGSbt({ 1.0f,0.0f,1.0f });
@@ -208,6 +229,7 @@ void main() {
 		LaunchParameters* p = nullptr;
 		uint64 AddressBiasOfFrameNumberInLaunchParams = (uint64)(&p->FrameNumber) - (uint64)(p);
 		uint64 AddressBiasOfCameraDataInLaunchParams = (uint64)(&p->cameraData) - (uint64)(p);
+		uint64 AddressBiasOfConsoleOptions = (uint64)(&p->consoleOptions) - (uint64)(p);
 		uint64 AddressBiasOfSeedInLaunchParams = (uint64)(&p->Seed) - (uint64)(p);
 		uint64 AddressBiasOfHeightInLaunchParams = (uint64)(&p->Height) - (uint64)(p);
 		uint64 AddressBiasOfWidthInLaunchParams = (uint64)(&p->Width) - (uint64)(p);
@@ -335,12 +357,37 @@ void main() {
 		CUDA_CHECK(cudaStreamCreate(&Stream));
 		// render loop
 		// -----------
+
+		// Setup Dear ImGui context
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+		ImGuiIO& io = ImGui::GetIO();
+		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+		io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+
+		// Setup Platform/Renderer backends
+		ImGui_ImplGlfw_InitForOpenGL(window, true);          // Second param install_callback=true will install GLFW callbacks and chain to existing ones.
+		ImGui_ImplOpenGL3_Init();
+		disableMinimizeButton(window);
+
+		io.FontGlobalScale = 1.5f;
+		ConsoleOptions consoleOptions;
+		ConsoleOptions* consoleOptionsDevice;
+		CUDA_CHECK(cudaMalloc(&consoleOptionsDevice, sizeof(consoleOptionsDevice)));
 		while (!glfwWindowShouldClose(window))
 		{
+			static int debug_mode_current_item = 0;
+			static int accumulate_frame_mode=2;
+			consoleOptions.debugMode =(ConsoleDebugMode)debug_mode_current_item;
+			consoleOptions.frameAccumulationOptions = (FrameAccumulationOptions)accumulate_frame_mode;
+
+			
+			CUDA_CHECK(cudaMemcpyAsync(consoleOptionsDevice, &consoleOptions, sizeof(ConsoleOptions), cudaMemcpyHostToDevice, Stream));
+
 			int width, height;
 			glfwGetWindowSize(window, &width, &height);
 			glViewport(0, 0, width, height);
-			if (prev_width != width || prev_height != height) {
+			if (prev_width != width || prev_height != height && accumulate_frame_mode!=0) {
 				prev_width = width;
 				prev_height = height;
 				//先删除资源
@@ -429,13 +476,15 @@ void main() {
 				params.IndirectOutputBuffer = (float3*)FrameBuffer2.GetPtr();
 				params.PixelOffset=RandomGeneratorPixelOffset;
 				params.BlueNoiseBuffer=BlueNoise.GetBuffer();
+				params.consoleOptions = consoleOptionsDevice;
 				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &params, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
 			}
 
 			//开始渲染逻辑
 			//更新lparams
-			if (KeyBoardActionBitMask || MouseActionBitMask) {
-				FrameCounter = 0;
+			if (KeyBoardActionBitMask || MouseActionBitMask ) {
+				if(accumulate_frame_mode != 0)
+					FrameCounter = 0;
 				camera.Update(delta_time,
 					KeyBoardActionBitMask,
 					MouseActionBitMask,
@@ -457,7 +506,7 @@ void main() {
 			//希望当相机不动时累计结果
 			{
 				uint pixel_count = width * height;
-				void* args[] = { &pixel_count,&FrameCounter,&devPtr,FrameBuffer2.GetAddressOfPtr(),FrameBuffer3.GetAddressOfPtr()};
+				void* args[] = { &pixel_count,&FrameCounter,&devPtr,FrameBuffer2.GetAddressOfPtr(),FrameBuffer3.GetAddressOfPtr(),&consoleOptionsDevice};
 
 				uint threads_per_block = (uint)min(512, width * height);
 				uint num_blocks = (uint)ceil(width * height / (float)threads_per_block);
@@ -492,12 +541,21 @@ void main() {
 			glBindVertexArray(VAO); // seeing as we only have a single VAO there's no need to bind it every time, but we'll do so to keep things a bit more organized
 			glBindTexture(GL_TEXTURE_2D, texture);
 			glDrawArrays(GL_TRIANGLES, 0, 6);
-			// glBindVertexArray(0); // no need to unbind it every time 
-
-			// glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
-			// -------------------------------------------------------------------------------
-			glfwSwapBuffers(window);
+			
 			glfwPollEvents();
+
+			ImGui_ImplOpenGL3_NewFrame();
+			ImGui_ImplGlfw_NewFrame();
+			ImGui::NewFrame();
+
+			ImGui::Begin("Debug Console");
+
+			ImGui::Combo("Debug Mode", &debug_mode_current_item, debugModeItems, IM_ARRAYSIZE(debugModeItems));
+			ImGui::Combo("Frame Accumulation Mode", &accumulate_frame_mode, frameAccumulationItems, IM_ARRAYSIZE(frameAccumulationItems));
+			ImGui::End();
+
+			ImGui::Render();
+			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 			//更新游戏计数器
 			auto end = high_resolution_clock::now();
 			delta_time = duration_cast<milliseconds>(end - start).count();
@@ -506,7 +564,13 @@ void main() {
 			ss << "Optix Renderer     FPS:" << 1000.0f / delta_time << endl;
 			glfwSetWindowTitle(window, ss.str().c_str());
 			FrameNumber++;
+			CUDA_CHECK(cudaStreamSynchronize(Stream));
+			glfwSwapBuffers(window);
 		}
+		ImGui_ImplOpenGL3_Shutdown();
+		ImGui_ImplGlfw_Shutdown();
+		ImGui::DestroyContext();
+		CUDA_CHECK(cudaFree(consoleOptionsDevice));
 		CUDA_CHECK(cudaFree(RandomGeneratorPixelOffset));
 		// optional: de-allocate all resources once they've outlived their purpose:
 		// ------------------------------------------------------------------------
