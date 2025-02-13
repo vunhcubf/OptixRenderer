@@ -117,8 +117,8 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 			}
 			// 间接辐照度收集灯光光照
 			else if (hitInfo.surfaceType == SurfaceType::Light) {
-				IrradianceIndirect = GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr)));
-				IrradianceIndirect *= BsdfIndirect / WeightSum;
+				float3 LightColor = GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr)));
+				IrradianceIndirect = LightColor* BsdfIndirect / WeightSum;
 				terminateRay = true;
 			}
 			// 命中物体，继续渲染，不收集光照

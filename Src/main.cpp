@@ -126,7 +126,7 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/black.png");
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/zwartkops_straight_morning_2k.png");
 		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
@@ -137,7 +137,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 4;
+		conf.MaxRayRecursiveDepth = 8;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -195,15 +195,15 @@ void main() {
 				rectangleLight1.PackMaterialBuffer(),
 				{ "HitGroup_fetchHitInfo_proceduralgeo_rectangle_light" }, true);
 		}
-		//{
-		//	SphereLight SphereLight1(
-		//		make_float3(-8.2, -2.76, 0.562), 0.05, make_float3(1, 0.3, 0.3), 200);
-		//	string name = "sphere_light1";
-		//	scene.AddProceduralObject(
-		//		name, SphereLight1.GetAabb(),
-		//		SphereLight1.PackMaterialBuffer(),
-		//		{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
-		//}
+		{
+			SphereLight SphereLight1(
+				make_float3(-8.2, -2.76, 0.562), 0.05, make_float3(1, 0.3, 0.3), 200);
+			string name = "sphere_light1";
+			scene.AddProceduralObject(
+				name, SphereLight1.GetAabb(),
+				SphereLight1.PackMaterialBuffer(),
+				{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
+		}
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
 		scene.ConfigureRGSbt({ 1.0f,0.0f,1.0f });
@@ -376,7 +376,7 @@ void main() {
 		CUDA_CHECK(cudaMalloc(&consoleOptionsDevice, sizeof(consoleOptionsDevice)));
 		while (!glfwWindowShouldClose(window))
 		{
-			static int debug_mode_current_item = 0;
+			static int debug_mode_current_item = 1;
 			static int accumulate_frame_mode=2;
 			consoleOptions.debugMode =(ConsoleDebugMode)debug_mode_current_item;
 			consoleOptions.frameAccumulationOptions = (FrameAccumulationOptions)accumulate_frame_mode;
