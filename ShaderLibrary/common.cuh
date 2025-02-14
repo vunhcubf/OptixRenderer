@@ -222,53 +222,6 @@ struct MissData {
     //uint64 skyBoxTextureIdentifier;
 	TextureView SkyBox;
 };
-struct BlueNoiseMapBuffer{
-    unsigned char* Data;
-    int width;
-    int height;
-    int channel;
-	template<uint channels>
-	DEVICE void Sample(uint2 pixel_id,void* result);
-	template<>
-	DEVICE void Sample<1>(uint2 pixel_id,void* result){
-		pixel_id.y=pixel_id.y%height;
-		pixel_id.x=pixel_id.x%width;
-		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
-		float* res=(float*)result;
-		res[0]=(Data[address_offset]/255.0f);
-	}
-	template<>
-	DEVICE void Sample<2>(uint2 pixel_id,void* result){
-		pixel_id.y=pixel_id.y%height;
-		pixel_id.x=pixel_id.x%width;
-		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
-		float2* res=(float2*)result;
-		res->x=(Data[address_offset]/255.0f);
-		res->y=(Data[address_offset+1]/255.0f);
-	}
-	template<>
-	DEVICE void Sample<3>(uint2 pixel_id,void* result){
-		pixel_id.y=pixel_id.y%height;
-		pixel_id.x=pixel_id.x%width;
-		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
-		float3* res=(float3*)result;
-		res->x=(Data[address_offset]/255.0f);
-		res->y=(Data[address_offset+1]/255.0f);
-		res->z=(Data[address_offset+2]/255.0f);
-	}
-	template<>
-	DEVICE void Sample<4>(uint2 pixel_id,void* result){
-		pixel_id.y=pixel_id.y%height;
-		pixel_id.x=pixel_id.x%width;
-		uint address_offset=(pixel_id.y * width + pixel_id.x) * channel;
-		float4* res=(float4*)result;
-		res->x=(Data[address_offset]/255.0f);
-		res->y=(Data[address_offset+1]/255.0f);
-		res->z=(Data[address_offset+2]/255.0f);
-		res->w=(Data[address_offset+3]/255.0f);
-	}
-	DEVICE inline uint2 GetLoopSamplePixelId();
-};
 enum class FrameAccumulationOptions :int {
 	ForceOn=0,
 	ForceOff=1,
@@ -294,7 +247,6 @@ struct LaunchParameters {
 	uint Spp;
 	uint MaxRecursionDepth;
 	uint64* PixelOffset;
-	BlueNoiseMapBuffer* BlueNoiseBuffer;
 	CUdeviceptr LightListArrayptr;
 	uint LightListLength;
 	ConsoleOptions* consoleOptions;
@@ -346,19 +298,6 @@ struct PerRayData {
 	uint RayHitType;
 	float3 DebugData;
 };
-DEVICE inline uint2 BlueNoiseMapBuffer::GetLoopSamplePixelId(){
-	uint3 id=optixGetLaunchIndex();
-	uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
-	uint64 pixeloffset=RayTracingGlobalParams.PixelOffset[threadid];
-	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
-	pixeloffset=pixeloffset%(width*height);
-	uint2 res=make_uint2(pixeloffset%width,pixeloffset/width);
-	res.x+=id.x;
-	res.y+=id.y;
-	res.y=res.y%height;
-	res.x=res.x%width;
-	return res;
-}
 #define SAMPLE_BLUENOISE_4D(x) RayTracingGlobalParams.BlueNoiseBuffer->Sample<4>(make_uint2(optixGetLaunchIndex().x,optixGetLaunchIndex().y),&x)
 template<typename T>
 static INLINE DEVICE T SampleTexture2DWithCompliationSpecification(TextureView tex, float u, float v) {

@@ -137,43 +137,6 @@ inline void ResetMaterial(Material& mat) {
     mat.Opacity = 1.0f;
     mat.MaterialType = MaterialType::MATERIAL_OBJ;
 }
-struct BlueNoiseMapBuffer{
-    unsigned char* Data;
-    int width;
-    int height;
-    int channel;
-};
-struct BlueNoiseMapBufferManager{
-public:
-    unsigned char* hostdata;
-    unsigned char* devicedata;
-    BlueNoiseMapBuffer* devicebuffer;
-    int width;
-    int height;
-    int channel;
-public:
-    inline BlueNoiseMapBuffer* GetBuffer(){
-        return devicebuffer;
-    }
-    inline BlueNoiseMapBufferManager(const char* path){
-        this->hostdata = stbi_load(path, &this->width, &this->height, &this->channel, 0);
-        // 自动上传数据到gpu
-        CUDA_CHECK(cudaMalloc(&devicedata,sizeof(unsigned char)*width*height*channel));
-        CUDA_CHECK(cudaMemcpy(devicedata,hostdata,sizeof(unsigned char)*width*height*channel,cudaMemcpyHostToDevice));
-        BlueNoiseMapBuffer hostbuffer;
-        hostbuffer.width=this->width;
-        hostbuffer.height=this->height;
-        hostbuffer.channel=this->channel;
-        hostbuffer.Data=this->devicedata;
-        CUDA_CHECK(cudaMalloc(&devicebuffer,sizeof(BlueNoiseMapBuffer)));
-        CUDA_CHECK(cudaMemcpy(devicebuffer,&hostbuffer,sizeof(BlueNoiseMapBuffer),cudaMemcpyHostToDevice));
-    }
-    inline ~BlueNoiseMapBufferManager(){
-        CUDA_CHECK(cudaFree(devicebuffer));
-        CUDA_CHECK(cudaFree(devicedata));
-        stbi_image_free(hostdata);
-    }
-};
 enum class FrameAccumulationOptions :int {
     ForceOn = 0,
     ForceOff = 1,
@@ -201,7 +164,6 @@ struct LaunchParameters {
     uint Spp;
     uint MaxRecursionDepth;
     uint64* PixelOffset;
-    BlueNoiseMapBuffer* BlueNoiseBuffer;
     CUdeviceptr LightListArrayptr;
     uint LightListLength;
     ConsoleOptions* consoleOptions;
@@ -332,8 +294,8 @@ inline std::string getParentDir(std::string path) {
     std::filesystem::path filepath=path;
     return filepath.parent_path().string();
 }
-const uint default_width = 1024;
-const uint default_height = 1024;
+const uint default_width = 768;
+const uint default_height = 768;
 
 float3 operator+(float3 a, float3 b);
 float3 operator-(float3 a, float3 b);

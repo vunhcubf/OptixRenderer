@@ -61,8 +61,6 @@ void main() {
 		string CompiledShaderPath = ProjectPath + "/CompiledShaders";
 		string ShaderPath = ProjectPath + "/Shaders";
 		string BlueNoiseMapPath = ProjectPath + "/Assets/Textures/black.png";
-		// 加载蓝噪声图
-		BlueNoiseMapBufferManager BlueNoise(BlueNoiseMapPath.c_str());
 		// 所有文件都编译
 		ShaderCollection shader_sources = ReadShaderSources(ProjectPath);
 		// 先检测有哪些shader，对于存在的shader比较hash值，对于新的shader直接加入编译
@@ -475,7 +473,6 @@ void main() {
 				params.MaxRecursionDepth = scene.GetMaxRecursionDepth();
 				params.IndirectOutputBuffer = (float3*)FrameBuffer2.GetPtr();
 				params.PixelOffset=RandomGeneratorPixelOffset;
-				params.BlueNoiseBuffer=BlueNoise.GetBuffer();
 				params.consoleOptions = consoleOptionsDevice;
 				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &params, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
 			}
