@@ -91,7 +91,7 @@ void main() {
 					"-ID:/OptixRenderer/ShaderLibrary",
 				};
 
-				nvrtcResult compileResult = nvrtcCompileProgram(prog, 8, opts);
+				nvrtcResult compileResult = nvrtcCompileProgram(prog, sizeof(opts)/sizeof(opts[0]), opts);
 
 				// ºÏ≤È±‡“Î¥ÌŒÛ
 				if (compileResult != NVRTC_SUCCESS) {
@@ -153,21 +153,34 @@ void main() {
 		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_sphere_light", "module_disney_principled", "__closesthit__light", "", "__intersection__sphere_light");
 
 		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_rectangle_light", "module_disney_principled", "__closesthit__light", "", "__intersection__rectangle_light");
+		//{
+		//	ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
+		//	for (const auto& one : cornel) {
+		//		const string& name = one.first;
+		//		const Mesh& mesh = one.second.first;
+		//		Material mat = one.second.second;
+		//		ObjectDesc desc;
+		//		desc.mesh = mesh;
+		//		desc.mat = mat;
+		//		desc.shaders = { "HitGroup_fetchHitInfo" };
+		//		scene.AddObjects(desc, name);
+		//	}
+		//}
+		//{
+		//	ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj");
+		//	for (const auto& one : sponza) {
+		//		const string& name = one.first;
+		//		const Mesh& mesh = one.second.first;
+		//		const Material& mat = one.second.second;
+		//		ObjectDesc desc;
+		//		desc.mesh = mesh;
+		//		desc.mat = mat;
+		//		desc.shaders = { "HitGroup_fetchHitInfo" };
+		//		scene.AddObjects(desc, name);
+		//	}
+		//}
 		{
-			ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
-			for (const auto& one : cornel) {
-				const string& name = one.first;
-				const Mesh& mesh = one.second.first;
-				Material mat = one.second.second;
-				ObjectDesc desc;
-				desc.mesh = mesh;
-				desc.mat = mat;
-				desc.shaders = { "HitGroup_fetchHitInfo" };
-				scene.AddObjects(desc, name);
-			}
-		}
-		{
-			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj");
+			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/scene1/optix_scene.obj");
 			for (const auto& one : sponza) {
 				const string& name = one.first;
 				const Mesh& mesh = one.second.first;

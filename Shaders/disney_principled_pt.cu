@@ -58,11 +58,13 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 		float4 Noise4 = hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth));
 		float4 Noise14 = hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth + 0x11932287U));
 		float3 V = normalize(-RayDirection);
+		float3 HForwardIndirect;
 		{
 			float3 HForward;
 			RayDirection = SampleBsdf(surfaceData, make_float3(Noise4.x, Noise4.y, Noise4.z), V, IsTransmission, HForward);
 			Pf_X = EvalPdf(surfaceData, V, RayDirection, IsTransmission, HForward);
 			BsdfIndirect = EvalBsdf(surfaceData, V, RayDirection, IsTransmission, HForward);
+			HForwardIndirect = HForward;
 		}
 		// Pf_X为bsdf样本的bsdf概率
 		// Pf_Y为灯光样本的bsdf概率
@@ -77,7 +79,7 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 		float3 IrradianceIndirect = make_float3(0);
 		float3 WeightNew = make_float3(0);
 		bool terminateRay = false;
-		if (surfaceData.Transmission < 1e-3f && RayTracingGlobalParams.consoleOptions->debugMode==ConsoleDebugMode::MIS) {
+		if (!IsTransmission && RayTracingGlobalParams.consoleOptions->debugMode==ConsoleDebugMode::MIS) {
 			// 直接光
 			for (uint lightIndex = 0; lightIndex < RayTracingGlobalParams.LightListLength; lightIndex++) {
 				uint LightToSample = lightIndex;
@@ -148,7 +150,7 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 			}
 			if (terminateRay) {
 				Radiance += Weight * IrradianceIndirect;
-			}
+			} 
 		}
 
 		Weight = WeightNew;

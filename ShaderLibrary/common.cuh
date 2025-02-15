@@ -8,6 +8,7 @@
 #include <curand_kernel.h>
 #include <cuda/helpers.h>
 #include "optix_device.h"
+
 /// @brief ///////////////////
 #define TEXTURE_FORMAT_UCHAR1 0
 #define TEXTURE_FORMAT_UCHAR2 1
@@ -219,7 +220,6 @@ struct RayGenData
 struct MissData {
     float3 BackgroundColor;
     float SkyBoxIntensity;
-    //uint64 skyBoxTextureIdentifier;
 	TextureView SkyBox;
 };
 enum class FrameAccumulationOptions :int {

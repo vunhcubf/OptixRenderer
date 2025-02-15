@@ -87,7 +87,7 @@ public:
 			textureFormat=TEXTURE_FORMAT_UCHAR4;
 		}
 		else{
-			throw std::runtime_error("unsupport channel count when LoadLDRImage");
+			throw std::runtime_error("¶ÁÈ¡: "+string(path) + "Ê±Óöµ½´íÎó");
 		}
 		Texture2D instance=Texture2D(data,w,h,textureFormat);
 		free(data);
