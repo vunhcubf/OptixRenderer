@@ -153,32 +153,6 @@ void main() {
 		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_sphere_light", "module_disney_principled", "__closesthit__light", "", "__intersection__sphere_light");
 
 		scene.AddHitShader("HitGroup_fetchHitInfo_proceduralgeo_rectangle_light", "module_disney_principled", "__closesthit__light", "", "__intersection__rectangle_light");
-		//{
-		//	ObjLoadResult cornel = LoadObj(ProjectPath + "/Assets/Models/cornel.obj");
-		//	for (const auto& one : cornel) {
-		//		const string& name = one.first;
-		//		const Mesh& mesh = one.second.first;
-		//		Material mat = one.second.second;
-		//		ObjectDesc desc;
-		//		desc.mesh = mesh;
-		//		desc.mat = mat;
-		//		desc.shaders = { "HitGroup_fetchHitInfo" };
-		//		scene.AddObjects(desc, name);
-		//	}
-		//}
-		//{
-		//	ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj");
-		//	for (const auto& one : sponza) {
-		//		const string& name = one.first;
-		//		const Mesh& mesh = one.second.first;
-		//		const Material& mat = one.second.second;
-		//		ObjectDesc desc;
-		//		desc.mesh = mesh;
-		//		desc.mat = mat;
-		//		desc.shaders = { "HitGroup_fetchHitInfo" };
-		//		scene.AddObjects(desc, name);
-		//	}
-		//}
 		{
 			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/scene1/optix_scene.obj");
 			for (const auto& one : sponza) {
@@ -208,7 +182,7 @@ void main() {
 		}
 		{
 			SphereLight SphereLight1(
-				make_float3(-8.2, -2.76, 0.562), 0.05, make_float3(1, 0.3, 0.3), 200);
+				make_float3(-8.2, -2.76, 0.562), 0.15, make_float3(1, 0.3, 0.3), 200);
 			string name = "sphere_light1";
 			scene.AddProceduralObject(
 				name, SphereLight1.GetAabb(),
