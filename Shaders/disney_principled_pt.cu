@@ -58,13 +58,11 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 		float4 Noise4 = hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth));
 		float4 Noise14 = hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth + 0x11932287U));
 		float3 V = normalize(-RayDirection);
-		float3 HForwardIndirect;
 		{
 			float3 HForward;
 			RayDirection = SampleBsdf(surfaceData, make_float3(Noise4.x, Noise4.y, Noise4.z), V, IsTransmission, HForward);
 			Pf_X = EvalPdf(surfaceData, V, RayDirection, IsTransmission, HForward);
 			BsdfIndirect = EvalBsdf(surfaceData, V, RayDirection, IsTransmission, HForward);
-			HForwardIndirect = HForward;
 		}
 		// Pf_X为bsdf样本的bsdf概率
 		// Pf_Y为灯光样本的bsdf概率
@@ -81,33 +79,33 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 		bool terminateRay = false;
 		if (!IsTransmission && RayTracingGlobalParams.consoleOptions->debugMode==ConsoleDebugMode::MIS) {
 			// 直接光
-			for (uint lightIndex = 0; lightIndex < RayTracingGlobalParams.LightListLength; lightIndex++) {
-				uint LightToSample = lightIndex;
-				LightToSample = min(LightToSample, RayTracingGlobalParams.LightListLength - 1);
-				Assert(LightToSample < RayTracingGlobalParams.LightListLength);
-				float3 LiDirect, BrdfDirect;
+			// 随机选择光源进行评估，分层抽样
+			// 若选择了一个灯光，就忽略其他灯光
+			uint LightToSample = (uint)floor(frac(Noise14.z) * RayTracingGlobalParams.LightListLength);
+			LightToSample = min(RayTracingGlobalParams.LightListLength - 1, LightToSample);
+			float3 LiDirect, BrdfDirect;
 				
-				float4 SampleResult = SampleLight(LightToSample, Noise14.x, Noise14.y, surfaceData.Position);
-				float3 SamplePoint = make_float3(SampleResult.x, SampleResult.y, SampleResult.z);
-				float3 RayDirDirectLight = normalize(SamplePoint - surfaceData.Position);
-				HitInfo hitInfoDirectLight;
-				TraceRay(hitInfoDirectLight, surfaceData.Position, RayDirDirectLight, TMIN, 0, 1, 0);
-				LiDirect = hitInfoDirectLight.surfaceType == SurfaceType::Light ? GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfoDirectLight.SbtDataPtr))) : make_float3(0.0f);
-				BrdfDirect = EvalBsdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
+			float4 SampleResult = SampleLight(LightToSample, Noise14.x, Noise14.y, surfaceData.Position);
+			float3 SamplePoint = make_float3(SampleResult.x, SampleResult.y, SampleResult.z);
+			float3 RayDirDirectLight = normalize(SamplePoint - surfaceData.Position);
+			HitInfo hitInfoDirectLight;
+			TraceRay(hitInfoDirectLight, surfaceData.Position, RayDirDirectLight, TMIN, 0, 1, 0);
+			LiDirect = hitInfoDirectLight.surfaceType == SurfaceType::Light ? GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfoDirectLight.SbtDataPtr))) : make_float3(0.0f);
+			BrdfDirect = EvalBsdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
 
-				// 进行MIS f为Brdf采样， g为光源采样, X为Brdf样本，Y为光源样本
-				// 遍历所有灯光计算pdf
+			// 进行MIS f为Brdf采样， g为光源采样, X为Brdf样本，Y为光源样本
+			// 遍历所有灯光计算pdf
 				
-				float Pf_Y = EvalPdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
-				float WeightSum = Pf_Y;
-				for (uint light = 0; light < RayTracingGlobalParams.LightListLength; light++) {
-					float Pg_Y = PdfLight(light, surfaceData.Position, RayDirDirectLight);
-					WeightSum += Pg_Y;
-				}
-				IrradianceDirect += BrdfDirect * LiDirect / WeightSum;
+			float Pf_Y = EvalPdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
+			float WeightSum = Pf_Y;
+			for (uint light = 0; light < RayTracingGlobalParams.LightListLength; light++) {
+				float Pg_Y = PdfLight(light, surfaceData.Position, RayDirDirectLight) / RayTracingGlobalParams.LightListLength;
+				WeightSum += Pg_Y;
 			}
+			IrradianceDirect += BrdfDirect * LiDirect / WeightSum;
+
 			// 收集间接光照
-			float WeightSum = Pf_X;
+			WeightSum = Pf_X;
 			for (uint light = 0; light < RayTracingGlobalParams.LightListLength; light++) {
 				float Pg_X = PdfLight(light, surfaceData.Position, RayDirection);
 				WeightSum += Pg_X;

@@ -246,10 +246,10 @@ struct LaunchParameters {
 	uint64 FrameNumber;
 	uint Spp;
 	uint MaxRecursionDepth;
-	uint64* PixelOffset;
 	CUdeviceptr LightListArrayptr;
 	uint LightListLength;
 	ConsoleOptions* consoleOptions;
+	uint* DomeLightBuffer;
 };
 #define CONSOLE_OPTIONS (RayTracingGlobalParams.consoleOptions)
 
@@ -443,6 +443,23 @@ static INLINE DEVICE float2 GetSkyBoxUv(float3 RayDir) {
 	uv.x /= 2 * PI;
 	return uv;
 }
+static INLINE DEVICE float3 GetRayDirFromSkyBoxUv(float2 uv) {
+	float3 RayDir;
+
+	// 计算 RayDir.z
+	float phi = PI * (1 - uv.y);
+	RayDir.z = cos(phi);
+	float sin_phi = sin(phi);
+
+	// 计算角度 theta
+	float theta = 2 * PI * uv.x - PI / 2;
+
+	// 计算 RayDir.x 和 RayDir.y
+	RayDir.x = cos(theta)* sin_phi;
+	RayDir.y = sin(theta)* sin_phi;
+
+	return RayDir;
+}
 
 
 static DEVICE float Rand(uint& seed) {
@@ -557,26 +574,7 @@ static DEVICE float3 refract(const float3 incident, const float3 normal, const f
 	else
 		return eta * incident - (eta * dot(normal, incident) + sqrt(k)) * normal;
 }
-static DEVICE void AccumulatePixelOffset(){
-	uint3 id=optixGetLaunchIndex();
-    uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
-	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
-}
-static DEVICE uint64 FetchPixelOffset(){
-	uint3 id=optixGetLaunchIndex();
-    uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
-	return RayTracingGlobalParams.PixelOffset[threadid];
-}
-static DEVICE float RndUniform(){
-	uint3 id=optixGetLaunchIndex();
-	curandStateXORWOW_t state;
-	uint threadid=id.y*RayTracingGlobalParams.Width+id.x;
-	curand_init(RayTracingGlobalParams.Seed,
-		RayTracingGlobalParams.FrameNumber*100+RayTracingGlobalParams.PixelOffset[threadid],
-		threadid,&state);
-	atomicAdd(&RayTracingGlobalParams.PixelOffset[threadid],1);
-	return curand_uniform(&state);
-}
+
 DEVICE INLINE float UintAsFloat(uint& a) {
 	return __uint_as_float(a);
 }

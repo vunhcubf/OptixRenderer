@@ -221,3 +221,30 @@ DEVICE float PdfLight(uint lightIndex, float3 shadingPoint, float3 rayDir) {
         Assert(false);
     }
 }
+
+// 关于dome light的代码
+float3 SampleDomeLight(float rnd) {
+    uint*& domeLightBuffer = RayTracingGlobalParams.DomeLightBuffer;
+    uint w = domeLightBuffer[0];
+    uint h = domeLightBuffer[1];
+    rnd = saturate(rnd);
+    uint i = floor(rnd * w * h);
+    i = min(i, w * h - 1);
+    i += 2;
+    uint index = domeLightBuffer[i];
+    float2 uv = make_float2(index / h + 0.5, index % h + 0.5);
+    uv.x /= w;
+    uv.y /= h;
+    return GetRayDirFromSkyBoxUv(uv);
+}
+float GetDomeLightProb(float rnd) {
+    uint*& domeLightBuffer = RayTracingGlobalParams.DomeLightBuffer;
+    uint w = domeLightBuffer[0];
+    uint h = domeLightBuffer[1];
+    rnd = saturate(rnd);
+    uint i = floor(rnd * w * h);
+    i = min(i, w * h - 1);
+    i += 2 + w * h;
+    float prob = domeLightBuffer[i] / (float)(w * h);
+    prob = fmaxf(prob, 1e-7);
+}

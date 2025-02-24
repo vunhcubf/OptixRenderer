@@ -163,10 +163,10 @@ struct LaunchParameters {
     uint64 FrameNumber;
     uint Spp;
     uint MaxRecursionDepth;
-    uint64* PixelOffset;
     CUdeviceptr LightListArrayptr;
     uint LightListLength;
     ConsoleOptions* consoleOptions;
+    uint* DomeLightBuffer;
 };
 struct ModelData {
     GeometryBuffer* GeometryData;

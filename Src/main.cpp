@@ -8,6 +8,9 @@
 #include "random_host.h"
 #include <windows.h>
 #include "Light.h"
+#include "EMSample.h"
+extern "C" void GenerateQuantificationPrefixSumLookupTable_float4(float4* data, uint w, uint h, uint * &QuantificationProb, uint * &SampleIndex, bool debug = false);
+extern "C" void GenerateQuantificationPrefixSumLookupTable(double* data, uint w, uint h, uint * &QuantificationProb, uint * &SampleIndex, bool debug = false);
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #define GLFW_EXPOSE_NATIVE_WGL
@@ -60,7 +63,6 @@ void main() {
 		string ProjectPath = getParentDir(getParentDir(getParentDir(getExecutablePath())));// 向前滚动两级别
 		string CompiledShaderPath = ProjectPath + "/CompiledShaders";
 		string ShaderPath = ProjectPath + "/Shaders";
-		string BlueNoiseMapPath = ProjectPath + "/Assets/Textures/black.png";
 		// 所有文件都编译
 		ShaderCollection shader_sources = ReadShaderSources(ProjectPath);
 		// 先检测有哪些shader，对于存在的shader比较hash值，对于新的shader直接加入编译
@@ -124,7 +126,35 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/zwartkops_straight_morning_2k.png");
+		const char* skybox_path = "/Assets/Textures/citrus_orchard_road_2k.exr";
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + skybox_path);
+		// Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/black.png");
+
+		// 构建dome light
+		UniquePtrDevice DomeLightDeviceBuffer;
+		{
+			std::cout << "从" << skybox_path << "构建dome light" << endl;
+			if (skybox.GetTextureView().textureFormat != TEXTURE_FORMAT_FLOAT4) {
+				std::cerr << "请使用hdr环境贴图" << endl;
+				system("pause");
+			}
+			uint w, h;
+			float4* h_image = ReadOpenExr((ProjectPath + skybox_path).c_str(), w, h);
+			CUDA_CHECK(cudaMalloc(DomeLightDeviceBuffer.GetAddressOfPtr(), sizeof(uint) * (2 * w * h + 2)));
+			uint* QuantifiedProb = (uint*)malloc(sizeof(uint) * w * h);
+			uint* SampleIndex = (uint*)malloc(sizeof(uint) * w * h);
+			GenerateQuantificationPrefixSumLookupTable_float4(h_image, w, h, QuantifiedProb, SampleIndex, false);
+			// 打包成一个很长的buffer ,分别是w,h,prob,index
+			uint* DomeLightBuffer = (uint*)malloc(sizeof(uint) * (w * h * 2 + 2));
+			memcpy(DomeLightBuffer, &w, sizeof(uint));
+			memcpy(DomeLightBuffer + 1, &h, sizeof(uint));
+			memcpy(DomeLightBuffer + 2, QuantifiedProb, sizeof(uint) * w * h);
+			memcpy(DomeLightBuffer + 2 + w * h, SampleIndex, sizeof(uint) * w * h);
+			free(h_image);
+			free(QuantifiedProb);
+			free(SampleIndex);
+			CUDA_CHECK(cudaMemcpy(DomeLightDeviceBuffer.GetPtr(), DomeLightBuffer, sizeof(uint) * (w * h * 2 + 2),cudaMemcpyHostToDevice));
+		}
 		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
 		uint MouseActionBitMask = 0U;
@@ -135,7 +165,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 8;
+		conf.MaxRayRecursiveDepth = 6;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -189,6 +219,19 @@ void main() {
 				SphereLight1.PackMaterialBuffer(),
 				{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
 		}
+		const float R[7] = { 1.0, 1.0, 1.0, 0.05, 0.05, 0.05, 0.58 };  // 红色分量
+		const float G[7] = { 0.05, 0.65, 1.0, 1.0, 1.0, 0.05, 0.05 };  // 绿色分量
+		const float B[7] = { 0.05, 0.05, 0.05, 0.05, 1.0, 1.0, 0.83 };  // 蓝色分量
+		for(uint rainbow_i=0; rainbow_i<7; rainbow_i++)
+		{
+			SphereLight SphereLight2(
+				make_float3(-1+0.3* rainbow_i,-1,-1.16), 0.07, make_float3(R[rainbow_i], G[rainbow_i], B[rainbow_i]), 10);
+			string name = "sphere_light_rainbow_"+std::to_string(rainbow_i);
+			scene.AddProceduralObject(
+				name, SphereLight2.GetAabb(),
+				SphereLight2.PackMaterialBuffer(),
+				{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
+		}
 
 		scene.ConfigureMissSbt({ make_float3(0,0,0),1.0f,skybox.GetTextureView() });
 		scene.ConfigureRGSbt({ 1.0f,0.0f,1.0f });
@@ -218,7 +261,6 @@ void main() {
 		uint64 AddressBiasOfSeedInLaunchParams = (uint64)(&p->Seed) - (uint64)(p);
 		uint64 AddressBiasOfHeightInLaunchParams = (uint64)(&p->Height) - (uint64)(p);
 		uint64 AddressBiasOfWidthInLaunchParams = (uint64)(&p->Width) - (uint64)(p);
-		uint64 AddressBiasOfPixelOffsetInLaunchParams = (uint64)(&p->PixelOffset) - (uint64)(p);
 		uint64 AddressBiasOfIndirectOutputBufferInLaunchParams = (uint64)(&p->IndirectOutputBuffer) - (uint64)(p);
 		//创建渲染纹理用于帧结果累计
 		//希望渲染纹理不要频繁申请释放
@@ -230,12 +272,6 @@ void main() {
 		uint64 FrameNumber = 0;
 
 		// 初始化随机数器
-		uint64* RandomGeneratorPixelOffset;
-		{
-			uint PixelCount=prev_height*prev_width;
-			CUDA_CHECK(cudaMalloc(&RandomGeneratorPixelOffset,sizeof(uint64)*PixelCount));
-			CUDA_CHECK(cudaMemset(RandomGeneratorPixelOffset,0,sizeof(uint64)*PixelCount));
-		}
 		glfwInit();
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -404,15 +440,6 @@ void main() {
 				BiasedAddress = (uint64)LParams.GetPtr() + AddressBiasOfCameraDataInLaunchParams;
 				CameraData data = camera.ExportCameraData(width, height);
 				CUDA_CHECK(cudaMemcpyAsync((void*)BiasedAddress, &data, sizeof(CameraData), cudaMemcpyHostToDevice, Stream));
-				// 重新设置像素累计数据
-				{		
-					uint64 BiasedAddress = (uint64)LParams.GetPtr() + AddressBiasOfPixelOffsetInLaunchParams;		
-					CUDA_CHECK(cudaFree(RandomGeneratorPixelOffset));
-					uint PixelCount=prev_height*prev_width;
-					CUDA_CHECK(cudaMalloc(&RandomGeneratorPixelOffset,sizeof(uint64)*PixelCount));
-					CUDA_CHECK(cudaMemset(RandomGeneratorPixelOffset,0,sizeof(uint64)*PixelCount));
-					CUDA_CHECK(cudaMemcpy((void*)BiasedAddress,&RandomGeneratorPixelOffset,sizeof(uint64*),cudaMemcpyHostToDevice));
-				}
 				//重新创建FrameBuffer2
 				//重新累计
 				FrameCounter = 0;
@@ -459,8 +486,8 @@ void main() {
 				params.Spp = 1;
 				params.MaxRecursionDepth = scene.GetMaxRecursionDepth();
 				params.IndirectOutputBuffer = (float3*)FrameBuffer2.GetPtr();
-				params.PixelOffset=RandomGeneratorPixelOffset;
 				params.consoleOptions = consoleOptionsDevice;
+				params.DomeLightBuffer = (uint*)DomeLightDeviceBuffer.GetPtr();
 				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &params, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
 			}
 
@@ -555,7 +582,6 @@ void main() {
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();
 		CUDA_CHECK(cudaFree(consoleOptionsDevice));
-		CUDA_CHECK(cudaFree(RandomGeneratorPixelOffset));
 		// optional: de-allocate all resources once they've outlived their purpose:
 		// ------------------------------------------------------------------------
 		glDeleteVertexArrays(1, &VAO);
