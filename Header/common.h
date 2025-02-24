@@ -42,6 +42,14 @@ struct ProceduralGeometryMaterialBuffer {
     }
 };
 
+inline float Assert_Valid(float a, const char* file, int line) {
+    if (isnan(a) || isinf(a)) {
+        printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f.\033[0m\n", file, line, a);
+    }
+    return a;
+}
+#define ASSERT_VALID(x) Assert_Valid(x,__FILE__,__LINE__)
+
 struct TextureView{
 	uint width=0;
 	uint height=0;

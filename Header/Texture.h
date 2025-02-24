@@ -4,6 +4,7 @@
 #include <ImfRgbaFile.h>
 #include <ImfArray.h>
 #include <memory>
+#include <cfloat>
 
 #define TEXTURE_FORMAT_UCHAR1 0
 #define TEXTURE_FORMAT_UCHAR2 1
@@ -13,6 +14,15 @@
 #define TEXTURE_FORMAT_FLOAT2 5
 #define TEXTURE_FORMAT_FLOAT3 6
 #define TEXTURE_FORMAT_FLOAT4 7
+
+inline float RemoveInf(float x) {
+	if (isinf(x)) {
+		return 1E10;
+	}
+	else {
+		return x;
+	}
+}
 
 static inline float4* ReadOpenExr(const char* path, uint& width, uint& height) {
 	Imf::RgbaInputFile file(path);
@@ -29,10 +39,10 @@ static inline float4* ReadOpenExr(const char* path, uint& width, uint& height) {
 	float4* img = (float4*)malloc(sizeof(float4) * w * h);
 	for (uint iw = 0; iw < w; iw++) {
 		for (uint ih = 0; ih < h; ih++) {
-			img[ih + iw * h].x = pixels[w - 1 - iw][ih].r;
-			img[ih + iw * h].y = pixels[w - 1 - iw][ih].g;
-			img[ih + iw * h].z = pixels[w - 1 - iw][ih].b;
-			img[ih + iw * h].w = pixels[w - 1 - iw][ih].a;
+			img[ih + iw * h].x = RemoveInf(pixels[w - 1 - iw][ih].r);
+			img[ih + iw * h].y = RemoveInf(pixels[w - 1 - iw][ih].g);
+			img[ih + iw * h].z = RemoveInf(pixels[w - 1 - iw][ih].b);
+			img[ih + iw * h].w = RemoveInf(pixels[w - 1 - iw][ih].a);
 		}
 	}
 	return img;

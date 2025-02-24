@@ -731,15 +731,18 @@ DEVICE  INLINE T* GetSbtDataPointer(CUdeviceptr d) {
 	return (T*)d;
 }
 
-DEVICE float3 GetSkyBoxColor(CUdeviceptr dataptr,float3 RayDirection) {
+DEVICE float3 GetSkyBoxColor(CUdeviceptr dataptr, float3 RayDirection) {
 	MissData* data = (MissData*)dataptr;
-	float2 SkyBoxUv = GetSkyBoxUv(RayDirection);
+
+	float2 SkyBoxUv = ASSERT_VALID(GetSkyBoxUv(RayDirection));
+
 	if (IsTextureViewValid(data->SkyBox)) {
-		float4 skybox = SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y);
-		return make_float3(skybox.x, skybox.y, skybox.z);
+		float4 skybox = ASSERT_VALID(SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y));
+		return ASSERT_VALID(make_float3(skybox.x, skybox.y, skybox.z));
 	}
 	else {
-		return data->BackgroundColor * data->SkyBoxIntensity;
+		return ASSERT_VALID(data->BackgroundColor * data->SkyBoxIntensity);
 	}
 }
+
 
