@@ -465,37 +465,33 @@ static HOST DEVICE INLINE uint lcg4(uint prev)
 #define REVERSE_PI 0.318309886183791f
 
 static INLINE DEVICE float2 GetSkyBoxUv(float3 RayDir) {
-	//首先获取垂直方向
+	// 首先获取垂直方向
 	float2 uv;
-	uv.y = acos(RayDir.z) / PI;
-	uv.y = 1 - uv.y;
-	float tan_xy = RayDir.y / RayDir.x;
-	if (RayDir.x > 0) {
-		uv.x = atan(tan_xy);
-	}
-	else {
-		uv.x = atan(tan_xy)+PI;
-	}
-	uv.x += PI / 2;
-	uv.x /= 2 * PI;
-	return uv;
+	uv.y = ASSERT_VALID(acos(ASSERT_VALID(RayDir.z)) / PI);
+	uv.y = ASSERT_VALID(1 - uv.y);
+	uv.x = atan2(RayDir.y, RayDir.x);
+	uv.x = ASSERT_VALID(uv.x / (2 * PI));
+	return ASSERT_VALID(uv);
 }
+
 static INLINE DEVICE float3 GetRayDirFromSkyBoxUv(float2 uv) {
 	float3 RayDir;
 
 	// 计算 RayDir.z
-	float phi = PI * (1 - uv.y);
-	RayDir.z = cos(phi);
-	float sin_phi = sin(phi);
+	float phi = PI * (1 - ASSERT_VALID(uv.y));
+	RayDir.z = ASSERT_VALID(cos(phi));
 
-	// 计算角度 theta
-	float theta = 2 * PI * uv.x - PI / 2;
+	// 计算方位角 theta
+	float theta = ASSERT_VALID(2 * PI * uv.x);
+
+	// 计算 xy 平面上的投影半径
+	float sin_phi = ASSERT_VALID(sin(phi));
 
 	// 计算 RayDir.x 和 RayDir.y
-	RayDir.x = cos(theta)* sin_phi;
-	RayDir.y = sin(theta)* sin_phi;
+	RayDir.x = ASSERT_VALID(cos(theta) * sin_phi);
+	RayDir.y = ASSERT_VALID(sin(theta) * sin_phi);
 
-	return RayDir;
+	return ASSERT_VALID(RayDir);
 }
 
 

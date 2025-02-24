@@ -19,7 +19,7 @@ static INLINE DEVICE float DielectricFresnel(float3 HForward, float3 V, float Et
 		}
 		fs = saturate(fs);
 	}
-	return fs;
+	return ASSERT_VALID(fs);
 }
 static INLINE DEVICE float Disney_FD90(float roughness, float3 H, float3 L) {
 	float HoL = abs(dot(H, L));
@@ -59,7 +59,7 @@ static INLINE DEVICE float DistributionGGX(float NdotH, float roughness)
 	float denom = (NdotH2 * (a2 - 1.0) + 1.0);
 	denom = PI * denom * denom;
 	ASSERT_VALID(num / fmaxf(denom, FloatEpsilon));
-	return num / fmaxf(denom, FloatEpsilon);
+	return ASSERT_VALID(num / fmaxf(denom, FloatEpsilon));
 }
 static INLINE DEVICE float DistributionGGX(float3 N, float3 H, float roughness)
 {
@@ -74,14 +74,14 @@ static INLINE DEVICE float SmithG1(float3 wm, float3 v, float alpha) {
 	if (abs(cosTheta) <= 1e-4f)
 		return 0.0f;
 	float root = alpha * tanTheta;
-	return 2.0f / (1.0f + sqrt(1.0f + root * root));
+	return ASSERT_VALID(2.0f / (1.0f + sqrt(1.0f + root * root)));
 }
 static INLINE DEVICE float Smith_G(float3 n,float3 m, float3 v, float3 l, float roughness) {
 	float a = roughness * roughness;
 	if (dot(v, m) * dot(v, n) < 0.0f || dot(l, m) * dot(l, n) < 0.0f) {
 		return 0.0f;
 	}
-	return SmithG1(m, v, a) * SmithG1(m, l, a);
+	return ASSERT_VALID(SmithG1(m, v, a) * SmithG1(m, l, a));
 }
 static DEVICE float3 SpecularBrdf(SurfaceData& surfaceData,
 	float3 NForward, float3 HForward, float3 V, float3 L,float EtaI,float EtaO) {
@@ -99,8 +99,7 @@ static DEVICE float3 SpecularBrdf(SurfaceData& surfaceData,
 	//遮蔽项
 	float Gs = Smith_G(NForward, HForward, V, L, surfaceData.Roughness);
 	float3 brdf= lerp(fs, Fs, surfaceData.Metallic) * Gs * Ds / fmaxf(abs(4 * dot(NForward, V) * dot(NForward, L)), FloatEpsilon);
-	ASSERT_VALID(brdf);
-	return brdf;
+	return ASSERT_VALID(brdf);
 }
 static DEVICE float3 DiffuseBrdf(SurfaceData& data) {
 	//首先计算漫反射
@@ -120,8 +119,7 @@ static DEVICE float3 TransmissionBtdf(SurfaceData& surfaceData,
 
 	float3 numerator = sqrt(surfaceData.BaseColor) * (1 - fs) * Ds * Gs * abs(dot(HForward, L) * dot(HForward, V)) * EtaO * EtaO;
 	float denominator = abs(dot(NForward, V) * dot(NForward, L)) * pow2(EtaI * dot(V, HForward) + EtaO * dot(L, HForward));
-	ASSERT_VALID(numerator / fmaxf(denominator, FloatEpsilon));
-	return (surfaceData.Transmission) * (1 - surfaceData.Metallic)*numerator / fmaxf(denominator, FloatEpsilon);
+	return ASSERT_VALID((surfaceData.Transmission) * (1 - surfaceData.Metallic) * numerator / fmaxf(denominator, FloatEpsilon));
 }
 
 DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& IsTransmission,float3& H) {
@@ -142,8 +140,8 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 	if (noise.z < SAFETY_MARGIN(QTransmission)) {
 		float3 L = refract(-V, HForward, EtaI / EtaO, nullptr);
 		IsTransmission = true;
-		H = HForward;
-		return L;
+		H = ASSERT_VALID(HForward);
+		return ASSERT_VALID(L);
 	}
 	else {
 		float3 L;
@@ -165,8 +163,8 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 		//	L += d * 1e-3f;
 		//	L = normalize(L);
 		//}
-		H = normalize(V + L);
-		return L;
+		H = ASSERT_VALID(normalize(V + L));
+		return ASSERT_VALID(L);
 	}
 }
 DEVICE float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmission,float3 HForward) {
@@ -189,13 +187,13 @@ DEVICE float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmi
 	if (IsTransmission) {
 		float JacobTransmission = EtaO * EtaO * abs(dot(L, HForward)) / pow2(EtaI * dot(V, HForward) + EtaO * dot(L, HForward));
 		float PdfTransmission = PdfM * JacobTransmission;
-		return PdfTransmission * QTransmission;
+		return ASSERT_VALID(PdfTransmission * QTransmission);
 	}
 	else {
 		float JacobReflect = 1 / fmaxf(4 * abs(dot(HForward, L)), FloatEpsilon);
 		float PdfReflect = PdfM * JacobReflect;
 		float PdfCosWeighted = saturate(dot(NForward, L)) * REVERSE_PI;
-		return fmaxf(PdfReflect * QReflect + PdfCosWeighted * QDiffuse,FloatEpsilon);
+		return ASSERT_VALID(fmaxf(PdfReflect * QReflect + PdfCosWeighted * QDiffuse, FloatEpsilon));
 	}
 }
 
@@ -215,10 +213,10 @@ DEVICE float3 EvalBsdf(SurfaceData& surfaceData, float3 V, float3 L, bool IsTran
 
 	float PdfM = DistributionGGX(HForward, NForward, surfaceData.Roughness) * abs(dot(HForward, NForward));
 	if (IsTransmission) {
-		return dot(NForward,L)<0.0f?TransmissionBtdf(surfaceData, NForward, HForward, V, L, EtaO, EtaI) * saturate(-dot(NForward, L)):make_float3(0);
+		return ASSERT_VALID(dot(NForward, L) < 0.0f ? TransmissionBtdf(surfaceData, NForward, HForward, V, L, EtaO, EtaI) * saturate(-dot(NForward, L)) : make_float3(0));
 	}
 	else {
-		return  dot(NForward, L) < 0.0f ?make_float3(0): (DiffuseBrdf(surfaceData) + SpecularBrdf(surfaceData, NForward, HForward, V, L, EtaI, EtaO)) * saturate(dot(NForward, L));
+		return ASSERT_VALID(dot(NForward, L) < 0.0f ? make_float3(0) : (DiffuseBrdf(surfaceData) + SpecularBrdf(surfaceData, NForward, HForward, V, L, EtaI, EtaO)) * saturate(dot(NForward, L)));
 	}
 }
 

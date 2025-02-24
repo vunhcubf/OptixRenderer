@@ -98,7 +98,7 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 
             WeightSum = Pf_X;
             for (uint light = 0; light < RayTracingGlobalParams.LightListLength; light++) {
-                float Pg_X = ASSERT_VALID(PdfLight(light, surfaceData.Position, RayDirection));
+                float Pg_X = ASSERT_VALID(PdfLight(light, surfaceData.Position, RayDirection)) / RayTracingGlobalParams.LightListLength;
                 WeightSum += Pg_X;
             }
 
