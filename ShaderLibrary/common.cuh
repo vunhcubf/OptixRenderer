@@ -22,11 +22,30 @@
 #define IS_PIXEL(a,b) (optixGetLaunchIndex().x==a && optixGetLaunchIndex().y==b)
 
 
-
+#define PI_2 9.86960440109
 #define GLOBAL __global__
 #define DEVICE __device__
 #define HOST __host__
 #define INLINE __forceinline__
+
+DEVICE bool isnan(float3 a) {
+	return isnan(a.x) || isnan(a.y) || isnan(a.z);
+}
+DEVICE bool isinf(float3 a) {
+	return isinf(a.x) || isinf(a.y) || isinf(a.z);
+}
+DEVICE bool isnan(float2 a) {
+	return isnan(a.x) || isnan(a.y);
+}
+DEVICE bool isinf(float2 a) {
+	return isinf(a.x) || isinf(a.y);
+}
+DEVICE bool isnan(float4 a) {
+	return isnan(a.x) || isnan(a.y) || isnan(a.z) || isnan(a.w);
+}
+DEVICE bool isinf(float4 a) {
+	return isinf(a.x) || isinf(a.y) || isinf(a.z) || isinf(a.w);
+}
 
 DEVICE INLINE float GetNaN() {
 	return (__uint_as_float(0x7fc00000));
@@ -39,26 +58,44 @@ DEVICE INLINE void Assert(bool x) {
 #define TMIN 1e-3f
 #define FLOAT_NAN GetNaN()
 
-
+INLINE DEVICE float Assert_Valid(float a, const char* file, int line) {
+	if (isnan(a) || isinf(a)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f.\033[0m ThreadId: %u, %u\n", file, line, a, optixGetLaunchIndex().x, optixGetLaunchIndex().y);
+		Assert(0);
+	}
+	return a;
+}
+INLINE DEVICE float2 Assert_Valid(float2 a, const char* file, int line) {
+	if (isnan(a) || isinf(a)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f.\033[0m ThreadId: %u, %u\n", file, line, a.x, a.y, optixGetLaunchIndex().x, optixGetLaunchIndex().y);
+		Assert(0);
+	}
+	return a;
+}
+INLINE DEVICE float3 Assert_Valid(float3 a, const char* file, int line) {
+	if (isnan(a) || isinf(a)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f  Z:%f.\033[0m ThreadId: %u, %u\n", file, line, a.x, a.y, a.z, optixGetLaunchIndex().x, optixGetLaunchIndex().y);
+		Assert(0);
+	}
+	return a;
+}
+INLINE DEVICE float4 Assert_Valid(float4 a, const char* file, int line) {
+	if (isnan(a) || isinf(a)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f  Z:%f  W:%f.\033[0m ThreadId: %u, %u\n", file, line, a.x, a.y, a.z,a.w, optixGetLaunchIndex().x, optixGetLaunchIndex().y);
+		Assert(0);
+	}
+	return a;
+}
 
 #define SAFETY_MARGIN(a)\
 	(a<0.5f? a-FloatEpsilon : a+FloatEpsilon)
 #define ENABLE_ASSERT
 #ifdef ENABLE_ASSERT
-#define ASSERT_VALID(a) \
-    if (isnan(a) || isinf(a)) { \
-        printf("Assertion failed at %s:%d: Input is NaN or Inf. ThreadId: %u, %u\n", __FILE__, __LINE__, optixGetLaunchIndex().x,optixGetLaunchIndex().y); \
-        Assert(0); \
-    }
+#define ASSERT_VALID(a) Assert_Valid(a,__FILE__,__LINE__)
 #else
 #define ASSERT_VALID(a) (a)
 #endif
-DEVICE bool isnan(float3 a) {
-	return isnan(a.x) || isnan(a.y) || isnan(a.z);
-}
-DEVICE bool isinf(float3 a) {
-	return isinf(a.x) || isinf(a.y) || isinf(a.z);
-}
+
 typedef unsigned int uint;
 typedef unsigned long long uint64;
 typedef long long int64;

@@ -49,11 +49,12 @@ public:
     DEVICE INLINE  static float4 SampleSphereLight(float random1, float random2, float3 shading_point, float3 light_center, float radius) {
         float dc = length(light_center - shading_point);
         float sin_theta_max = radius / dc;
-        float cos_theta_max = sqrtf(1.0f - sin_theta_max * sin_theta_max);
+        float cos_theta_max = ASSERT_VALID(sqrtf(1.0f - sin_theta_max * sin_theta_max));
         float cos_theta = (1 - random1) + random1 * cos_theta_max;
+        cos_theta = saturate(cos_theta);
         float phi = 2 * PI * random2;
-        float ds = dc * cos_theta - sqrtf(radius * radius - dc * dc * (1 - cos_theta * cos_theta));
-        float cos_alpha = (dc * dc + radius * radius - ds * ds) / (2 * dc * radius);
+        float ds = dc * cos_theta - ASSERT_VALID(sqrtf(saturate(radius * radius - dc * dc * (1 - cos_theta * cos_theta)) ));
+        float cos_alpha = ASSERT_VALID((dc * dc + radius * radius - ds * ds) / (2 * dc * radius));
 
         float3 nNor = normalize(shading_point - light_center);
         float3 nTan;
@@ -65,10 +66,10 @@ public:
         }
         float3 nBiTan = cross(nTan, nNor);
 
-        float sin_alpha = sqrtf(1.0f - cos_alpha * cos_alpha);
-        float3 nObj = make_float3(sin_alpha * cos(phi), sin_alpha * sin(phi), cos_alpha);
-        nObj = nObj.x * nBiTan + nObj.y * nTan + nObj.z * nNor;
-        float3 SamplePoint = normalize(nObj) * radius + light_center;
+        float sin_alpha = ASSERT_VALID(sqrtf(saturate(1.0f - cos_alpha * cos_alpha)));
+        float3 nObj = ASSERT_VALID(make_float3(sin_alpha * cos(phi), sin_alpha * sin(phi), cos_alpha));
+        nObj = ASSERT_VALID(nObj.x * nBiTan + nObj.y * nTan + nObj.z * nNor);
+        float3 SamplePoint = ASSERT_VALID(normalize(nObj) * radius + light_center);
         float pdf = 1 / (2 * PI * (1 - cos_theta_max));
         return make_float4(SamplePoint, pdf);
     }
@@ -193,10 +194,10 @@ DEVICE float4 SampleLight(uint lightIndex, float r1, float r2, float3 shadingPoi
     float* dataPtr = FetchLightData(lightIndex);
     LightType lightType = FetchLightType(lightIndex);
     if (lightType == LightType::Sphere) {
-        return SphereLight::SampleAndGetPdf(dataPtr, r1, r2, shadingPoint);
+        return ASSERT_VALID(SphereLight::SampleAndGetPdf(dataPtr, r1, r2, shadingPoint));
     }
     else if (lightType == LightType::Rectangle) {
-        return RectangleLight::SampleAndGetPdf(dataPtr, r1, r2, shadingPoint);
+        return ASSERT_VALID(RectangleLight::SampleAndGetPdf(dataPtr, r1, r2, shadingPoint));
     }
 }
 DEVICE float PdfLight(uint lightIndex, float3 shadingPoint, float3 rayDir) {
@@ -223,7 +224,7 @@ DEVICE float PdfLight(uint lightIndex, float3 shadingPoint, float3 rayDir) {
 }
 
 // 关于dome light的代码
-float3 SampleDomeLight(float rnd) {
+DEVICE float3 SampleDomeLight(float rnd) {
     uint*& domeLightBuffer = RayTracingGlobalParams.DomeLightBuffer;
     uint w = domeLightBuffer[0];
     uint h = domeLightBuffer[1];
@@ -235,16 +236,19 @@ float3 SampleDomeLight(float rnd) {
     float2 uv = make_float2(index / h + 0.5, index % h + 0.5);
     uv.x /= w;
     uv.y /= h;
-    return GetRayDirFromSkyBoxUv(uv);
+    float3 rayDir= GetRayDirFromSkyBoxUv(uv);
+    return rayDir;
 }
-float GetDomeLightProb(float rnd) {
+DEVICE float GetDomeLightProb(float3 RayDir) {
     uint*& domeLightBuffer = RayTracingGlobalParams.DomeLightBuffer;
     uint w = domeLightBuffer[0];
     uint h = domeLightBuffer[1];
-    rnd = saturate(rnd);
-    uint i = floor(rnd * w * h);
-    i = min(i, w * h - 1);
-    i += 2 + w * h;
-    float prob = domeLightBuffer[i] / (float)(w * h);
+
+    float2 uv = GetSkyBoxUv(RayDir);
+    uint primitiveId = floor(uv.y * h) + h * floor(uv.x * w);
+    primitiveId += 2 + w * h;
+    float prob = domeLightBuffer[primitiveId] / (float)(w * h);
     prob = fmaxf(prob, 1e-7);
+    prob /= (2 * PI_2 * sin(PI * uv.y) + 1e-4);
+    return prob;
 }

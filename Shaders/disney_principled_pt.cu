@@ -73,18 +73,18 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 		TraceRay(hitInfo, surfaceData.Position, RayDirection, TMIN, 0, 1, 0);
 		// 只有非透明才收集直接光照
 
-		float3 IrradianceDirect=make_float3(0);
+		float3 IrradianceDirect = make_float3(0);
 		float3 IrradianceIndirect = make_float3(0);
 		float3 WeightNew = make_float3(0);
 		bool terminateRay = false;
-		if (!IsTransmission && RayTracingGlobalParams.consoleOptions->debugMode==ConsoleDebugMode::MIS) {
+		if (!IsTransmission && RayTracingGlobalParams.consoleOptions->debugMode == ConsoleDebugMode::MIS) {
 			// 直接光
 			// 随机选择光源进行评估，分层抽样
 			// 若选择了一个灯光，就忽略其他灯光
 			uint LightToSample = (uint)floor(frac(Noise14.z) * RayTracingGlobalParams.LightListLength);
 			LightToSample = min(RayTracingGlobalParams.LightListLength - 1, LightToSample);
 			float3 LiDirect, BrdfDirect;
-				
+
 			float4 SampleResult = SampleLight(LightToSample, Noise14.x, Noise14.y, surfaceData.Position);
 			float3 SamplePoint = make_float3(SampleResult.x, SampleResult.y, SampleResult.z);
 			float3 RayDirDirectLight = normalize(SamplePoint - surfaceData.Position);
@@ -95,7 +95,7 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 
 			// 进行MIS f为Brdf采样， g为光源采样, X为Brdf样本，Y为光源样本
 			// 遍历所有灯光计算pdf
-				
+
 			float Pf_Y = EvalPdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight));
 			float WeightSum = Pf_Y;
 			for (uint light = 0; light < RayTracingGlobalParams.LightListLength; light++) {
@@ -111,23 +111,23 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 				WeightSum += Pg_X;
 			}
 			if (hitInfo.surfaceType == SurfaceType::Miss) {
-				IrradianceIndirect = GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection);
-				IrradianceIndirect *= BsdfIndirect / WeightSum;
+				IrradianceIndirect = ASSERT_VALID(GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection));
+				IrradianceIndirect *= ASSERT_VALID(BsdfIndirect / WeightSum);
 				terminateRay = true;
 			}
 			// 间接辐照度收集灯光光照
 			else if (hitInfo.surfaceType == SurfaceType::Light) {
 				float3 LightColor = GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr)));
-				IrradianceIndirect = LightColor* BsdfIndirect / WeightSum;
+				IrradianceIndirect = LightColor * BsdfIndirect / WeightSum;
 				terminateRay = true;
 			}
 			// 命中物体，继续渲染，不收集光照
 			else {
 				WeightNew = Weight * BsdfIndirect / WeightSum;
 			}
-			Radiance += Weight * IrradianceDirect;
+			Radiance += ASSERT_VALID(Weight * IrradianceDirect);
 			if (terminateRay) {
-				Radiance += Weight * IrradianceIndirect;
+				Radiance += ASSERT_VALID(Weight * IrradianceIndirect);
 			}
 		}
 		else {
@@ -147,8 +147,8 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 				WeightNew = Weight * BsdfIndirect / Pf_X;
 			}
 			if (terminateRay) {
-				Radiance += Weight * IrradianceIndirect;
-			} 
+				Radiance += ASSERT_VALID(Weight * IrradianceIndirect);
+			}
 		}
 
 		Weight = WeightNew;
@@ -156,7 +156,7 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 			break;
 		}
 	}
-	RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = Radiance;
+	RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(Radiance);
 	return;
 }
 

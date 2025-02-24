@@ -126,7 +126,7 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		const char* skybox_path = "/Assets/Textures/citrus_orchard_road_2k.exr";
+		const char* skybox_path = "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr";
 		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + skybox_path);
 		// Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/black.png");
 
@@ -165,7 +165,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 6;
+		conf.MaxRayRecursiveDepth = 1;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -210,15 +210,15 @@ void main() {
 				rectangleLight1.PackMaterialBuffer(),
 				{ "HitGroup_fetchHitInfo_proceduralgeo_rectangle_light" }, true);
 		}
-		{
-			SphereLight SphereLight1(
-				make_float3(-8.2, -2.76, 0.562), 0.15, make_float3(1, 0.3, 0.3), 200);
-			string name = "sphere_light1";
-			scene.AddProceduralObject(
-				name, SphereLight1.GetAabb(),
-				SphereLight1.PackMaterialBuffer(),
-				{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
-		}
+		//{
+		//	SphereLight SphereLight1(
+		//		make_float3(-8.2, -2.76, 0.562), 0.15, make_float3(1, 0.3, 0.3), 200);
+		//	string name = "sphere_light1";
+		//	scene.AddProceduralObject(
+		//		name, SphereLight1.GetAabb(),
+		//		SphereLight1.PackMaterialBuffer(),
+		//		{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
+		//}
 		const float R[7] = { 1.0, 1.0, 1.0, 0.05, 0.05, 0.05, 0.58 };  // 红色分量
 		const float G[7] = { 0.05, 0.65, 1.0, 1.0, 1.0, 0.05, 0.05 };  // 绿色分量
 		const float B[7] = { 0.05, 0.05, 0.05, 0.05, 1.0, 1.0, 0.83 };  // 蓝色分量
