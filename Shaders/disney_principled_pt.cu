@@ -68,6 +68,7 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
         float3 IrradianceIndirect = ASSERT_VALID(make_float3(0));
         float3 WeightNew = ASSERT_VALID(make_float3(0));
         bool terminateRay = false;
+        bool DomeLight = RayTracingGlobalParams.DomeLightBuffer == nullptr;
 
         if (!IsTransmission && RayTracingGlobalParams.consoleOptions->debugMode == ConsoleDebugMode::MIS) {
             uint LightToSample = (uint)floor(frac(Noise14.z) * RayTracingGlobalParams.LightListLength);

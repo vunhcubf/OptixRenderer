@@ -21,12 +21,164 @@
 
 #define IS_PIXEL(a,b) (optixGetLaunchIndex().x==a && optixGetLaunchIndex().y==b)
 
-
+#define PI 3.14159265358979f
+#define REVERSE_PI 0.318309886183791f
 #define PI_2 9.86960440109
+#define HALF_PI 1.57079632679f
 #define GLOBAL __global__
 #define DEVICE __device__
 #define HOST __host__
 #define INLINE __forceinline__
+
+typedef unsigned int uint;
+typedef unsigned long long uint64;
+typedef long long int64;
+typedef float float32;
+typedef double float64;
+static const float FloatOneMinusEpsilon = 0x1.fffffep-1;
+#define FloatEpsilon 1e-7
+#define NO_TEXTURE_HERE 0xFFFFFFFF
+template <typename T>
+struct SbtRecord
+{
+	__align__(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
+	T data;
+};
+#define M_PI 3.14159265358979f
+#define M_REVERSE_PI 0.318309886183791f
+enum MaterialType {
+	MATERIAL_AREALIGHT,
+	MATERIAL_OBJ
+};
+enum SurfaceType : uint {
+	Light = 0x0,
+	Opaque = 0x1,
+	Miss = 0x2,
+	ProceduralObject = 0x3
+};
+enum PathTracerRayType {
+	RAYTYPE_RAYGEN,
+	RAYTYPE_CH_INDIRECT,
+	RAYTYPE_CH_OCCLUDED
+};
+
+struct PerRayData {
+	float3 Radience;
+	uint RecursionDepth;
+	uint Seed;
+	uint RayHitType;
+	float3 DebugData;
+};
+
+enum LightType :uint {
+	Sphere = 0xFFFF0000,
+	Rectangle = 0xFFFF0001,
+	Directional = 0xFFFF0002
+};
+
+struct ProceduralGeometryMaterialBuffer {
+	float Elements[16] = {};
+};
+struct TextureView {
+	uint width = 0;
+	uint height = 0;
+	unsigned char textureFormat = 0;
+	cudaTextureObject_t textureIdentifier = 0;
+};
+
+struct CameraData {
+	float3                 cam_eye;
+	float3                 cam_u, cam_v, cam_w;
+};
+struct SbtDataStruct
+{
+	CUdeviceptr DataPtr;
+};
+
+struct GeometryBuffer {
+	CUdeviceptr Normal = (CUdeviceptr)nullptr;
+	CUdeviceptr Vertices = (CUdeviceptr)nullptr;
+	CUdeviceptr uv = (CUdeviceptr)nullptr;
+};
+struct HitInfo { // 5 uint
+	CUdeviceptr SbtDataPtr;// 2 uint
+	uint PrimitiveID; // 1 uint
+	float2 TriangleCentroidCoord; // 2 uint
+	SurfaceType surfaceType;
+};
+struct RayGenData
+{
+	float r, g, b;
+	uint64 TestTex;
+};
+struct MissData {
+	float3 BackgroundColor;
+	float SkyBoxIntensity;
+	TextureView SkyBox;
+};
+enum class FrameAccumulationOptions :int {
+	ForceOn = 0,
+	ForceOff = 1,
+	Auto = 2
+};
+enum class ConsoleDebugMode :int {
+	NoDebug = 0,
+	MIS = 1
+};
+struct ConsoleOptions {
+	ConsoleDebugMode debugMode;
+	FrameAccumulationOptions frameAccumulationOptions;
+};
+struct LaunchParameters {
+	float3* IndirectOutputBuffer;
+	uchar4* ImagePtr;
+	uint Width;
+	uint Height;
+	CameraData cameraData;
+	OptixTraversableHandle Handle;
+	uint Seed;
+	uint64 FrameNumber;
+	uint Spp;
+	uint MaxRecursionDepth;
+	CUdeviceptr LightListArrayptr;
+	uint LightListLength;
+	ConsoleOptions* consoleOptions;
+	uint* DomeLightBuffer;
+};
+#define CONSOLE_OPTIONS (RayTracingGlobalParams.consoleOptions)
+
+//原理化BSDF
+// 现在使用texture view来描述纹理，但是不想改材质结构体的定义，把uint64当作指针吧
+struct Material
+{
+	TextureView NormalMap;
+	TextureView BaseColorMap;
+	TextureView ARMMap;
+	float3 BaseColor = make_float3(0.8, 0.8, 0.8);
+	float3 Emission = make_float3(0, 0, 0);
+	float Roughness = 0.5f;
+	float Metallic = 0.0f;
+	float Specular = 1.f;
+	float Transmission = 0.0f;
+	float Ior = 1.4f;
+	float SpecularTint = 0.0f;
+	float Opacity = 1.0f;
+	MaterialType MaterialType = MaterialType::MATERIAL_OBJ;
+};
+struct ModelData {
+	GeometryBuffer* GeometryData;
+	Material* MaterialData;
+};
+/////////////////////////////////////
+//判断光线命中的是灯光还是场景
+#define HIT_TYPE_SCENE 0
+#define HIT_TYPE_LIGHT 1
+
+#define BXDF_RAY_TYPE_DIFF 1U
+#define BXDF_RAY_TYPE_SPEC 2U
+#define BXDF_RAY_TYPE_TRANS 4U
+extern "C" __constant__ LaunchParameters RayTracingGlobalParams;
+
 
 DEVICE bool isnan(float3 a) {
 	return isnan(a.x) || isnan(a.y) || isnan(a.z);
@@ -172,39 +324,12 @@ INLINE DEVICE float4 AssertValidAndReport(float4 a, float4 extra1, const char* n
 #define ASSERT_VALID(a) (a)
 #endif
 
-typedef unsigned int uint;
-typedef unsigned long long uint64;
-typedef long long int64;
-typedef float float32;
-typedef double float64;
-static const float FloatOneMinusEpsilon = 0x1.fffffep-1;
-#define FloatEpsilon 1e-7
 
-enum LightType :uint {
-	Sphere = 0xFFFF0000,
-	Rectangle = 0xFFFF0001,
-	Directional = 0xFFFF0002
-};
-
-struct ProceduralGeometryMaterialBuffer {
-	float Elements[16] = {};
-};
-struct TextureView{
-	uint width=0;
-	uint height=0;
-	unsigned char textureFormat=0;
-	cudaTextureObject_t textureIdentifier=0;
-};
 static DEVICE bool IsTextureViewValid(TextureView view){
 	return view.width!=0 && view.height!=0;
 }
 const float goldenRatioConjugate = 0.061803398875f;
-enum SurfaceType : uint {
-	Light = 0x0,
-	Opaque = 0x1,
-	Miss = 0x2,
-	ProceduralObject = 0x3
-};
+
 static INLINE DEVICE void GetTBNFromN(float3 N, float3& T, float3& B) {
 	if (abs(N.x)<1e-7f) {
 		T = make_float3(0, N.z, -N.y);//x
@@ -281,19 +406,7 @@ DEVICE INLINE float4 frac(float4 a){
 	frac(a.z),
 	frac(a.w));
 }
-#define NO_TEXTURE_HERE 0xFFFFFFFF
-template <typename T>
-struct SbtRecord
-{
-    __align__(OPTIX_SBT_RECORD_ALIGNMENT) char header[OPTIX_SBT_RECORD_HEADER_SIZE];
-    T data;
-};
-#define M_PI 3.14159265358979f
-#define M_REVERSE_PI 0.318309886183791f
-enum MaterialType {
-    MATERIAL_AREALIGHT,
-    MATERIAL_OBJ
-};
+
 DEVICE uint getLow4Bytes(uint64 value) {
     return (uint)(value & 0xFFFFFFFF);
 }
@@ -305,112 +418,7 @@ DEVICE uint getHigh4Bytes(uint64 value) {
     return (uint)((value >> 32) & 0xFFFFFFFF);
 }
 
-struct CameraData {
-    float3                 cam_eye;
-    float3                 cam_u, cam_v, cam_w;
-};
-struct SbtDataStruct
-{
-    CUdeviceptr DataPtr;
-};
 
-struct GeometryBuffer {
-    CUdeviceptr Normal=(CUdeviceptr)nullptr;
-    CUdeviceptr Vertices = (CUdeviceptr)nullptr;
-    CUdeviceptr uv = (CUdeviceptr)nullptr;
-};
-struct HitInfo{ // 5 uint
-	CUdeviceptr SbtDataPtr;// 2 uint
-	uint PrimitiveID; // 1 uint
-	float2 TriangleCentroidCoord; // 2 uint
-	SurfaceType surfaceType;
- };
-struct RayGenData
-{
-    float r, g, b;
-    uint64 TestTex;
-};
-struct MissData {
-    float3 BackgroundColor;
-    float SkyBoxIntensity;
-	TextureView SkyBox;
-};
-enum class FrameAccumulationOptions :int {
-	ForceOn=0,
-	ForceOff=1,
-	Auto=2
-};
-enum class ConsoleDebugMode :int {
-	NoDebug = 0,
-	MIS = 1
-};
-struct ConsoleOptions {
-	ConsoleDebugMode debugMode;
-	FrameAccumulationOptions frameAccumulationOptions;
-};
-struct LaunchParameters {
-	float3* IndirectOutputBuffer;
-	uchar4* ImagePtr;
-	uint Width;
-	uint Height;
-	CameraData cameraData;
-	OptixTraversableHandle Handle;
-	uint Seed;
-	uint64 FrameNumber;
-	uint Spp;
-	uint MaxRecursionDepth;
-	CUdeviceptr LightListArrayptr;
-	uint LightListLength;
-	ConsoleOptions* consoleOptions;
-	uint* DomeLightBuffer;
-};
-#define CONSOLE_OPTIONS (RayTracingGlobalParams.consoleOptions)
-
-//原理化BSDF
-// 现在使用texture view来描述纹理，但是不想改材质结构体的定义，把uint64当作指针吧
-struct Material
-{
-    TextureView NormalMap;
-    TextureView BaseColorMap;
-    TextureView ARMMap;
-    float3 BaseColor = make_float3(0.8,0.8,0.8);
-    float3 Emission = make_float3(0, 0, 0);
-    float Roughness=0.5f;
-    float Metallic = 0.0f;
-    float Specular=1.f;
-    float Transmission = 0.0f;
-    float Ior = 1.4f;
-    float SpecularTint=0.0f;
-    float Opacity = 1.0f;
-    MaterialType MaterialType = MaterialType::MATERIAL_OBJ;
-};
-struct ModelData {
-    GeometryBuffer* GeometryData;
-    Material* MaterialData;
-};
-/////////////////////////////////////
-//判断光线命中的是灯光还是场景
-#define HIT_TYPE_SCENE 0
-#define HIT_TYPE_LIGHT 1
-
-#define BXDF_RAY_TYPE_DIFF 1U
-#define BXDF_RAY_TYPE_SPEC 2U
-#define BXDF_RAY_TYPE_TRANS 4U
-extern "C" __constant__ LaunchParameters RayTracingGlobalParams;
-
-enum PathTracerRayType {
-	RAYTYPE_RAYGEN,
-	RAYTYPE_CH_INDIRECT,
-	RAYTYPE_CH_OCCLUDED
-};
-
-struct PerRayData {
-	float3 Radience;
-	uint RecursionDepth;
-	uint Seed;
-	uint RayHitType;
-	float3 DebugData;
-};
 #define SAMPLE_BLUENOISE_4D(x) RayTracingGlobalParams.BlueNoiseBuffer->Sample<4>(make_uint2(optixGetLaunchIndex().x,optixGetLaunchIndex().y),&x)
 template<typename T>
 static INLINE DEVICE T SampleTexture2DWithCompliationSpecification(TextureView tex, float u, float v) {
@@ -537,8 +545,7 @@ static HOST DEVICE INLINE uint lcg4(uint prev)
 	return prev;
 }
 
-#define PI 3.14159265358979f
-#define REVERSE_PI 0.318309886183791f
+
 
 static INLINE DEVICE float2 GetSkyBoxUv(float3 RayDir) {
 	// 首先获取垂直方向
@@ -546,19 +553,22 @@ static INLINE DEVICE float2 GetSkyBoxUv(float3 RayDir) {
 	uv.y = ASSERT_VALID(acos(ASSERT_VALID(RayDir.z)) / PI);
 	uv.y = ASSERT_VALID(1 - uv.y);
 	uv.x = atan2(RayDir.y, RayDir.x);
+	if (RayDir.y < 0) {
+		uv.x += 2 * PI;
+	}
 	uv.x = ASSERT_VALID(uv.x / (2 * PI));
 	return ASSERT_VALID(uv);
 }
 
-static INLINE DEVICE float3 GetRayDirFromSkyBoxUv(float2 uv) {
+INLINE DEVICE float3 GetRayDirFromSkyBoxUv(float2 uv) {
 	float3 RayDir;
 
 	// 计算 RayDir.z
-	float phi = PI * (1 - ASSERT_VALID(uv.y));
+	float phi = PI * (1 - uv.y);
 	RayDir.z = ASSERT_VALID(cos(phi));
 
 	// 计算方位角 theta
-	float theta = ASSERT_VALID(2 * PI * uv.x);
+	float theta = uv.x * (2 * PI);
 
 	// 计算 xy 平面上的投影半径
 	float sin_phi = ASSERT_VALID(sin(phi));
@@ -569,7 +579,6 @@ static INLINE DEVICE float3 GetRayDirFromSkyBoxUv(float2 uv) {
 
 	return ASSERT_VALID(RayDir);
 }
-
 
 static DEVICE float Rand(uint& seed) {
 	const uint3 id = optixGetLaunchIndex();
