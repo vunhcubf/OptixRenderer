@@ -129,7 +129,7 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 	// 与射线方向同向的法线
 	float3 NForward = InSurface ? surfaceData.Normal : -surfaceData.Normal;
 
-	float3 HForward = ImportanceSampleGGX(make_float2(noise.x, noise.y), surfaceData.Roughness, NForward);
+	float3 HForward = ASSERT_VALID(ImportanceSampleGGX(make_float2(noise.x, noise.y), surfaceData.Roughness, NForward));
 	float QReflect = 1;
 	float QDiffuse = (1 - surfaceData.Metallic) * (1 - surfaceData.Transmission);
 	float QTransmission = (1 - surfaceData.Metallic) * surfaceData.Transmission * (1 - DielectricFresnel(HForward, V, EtaI, EtaO));
@@ -138,7 +138,7 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 	QTransmission /= QSum;
 	QDiffuse /= QSum;
 	if (noise.z < SAFETY_MARGIN(QTransmission)) {
-		float3 L = refract(-V, HForward, EtaI / EtaO, nullptr);
+		float3 L = ASSERT_VALID(refract(-V, HForward, EtaI / EtaO, nullptr));
 		IsTransmission = true;
 		H = ASSERT_VALID(HForward);
 		return ASSERT_VALID(L);
@@ -147,23 +147,14 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 		float3 L;
 		IsTransmission = false;
 		if (noise.z < SAFETY_MARGIN(QTransmission + QReflect)) {
-			L = normalize(2 * dot(HForward, V) * HForward - V);
+			L = ASSERT_VALID(normalize(2 * dot(HForward, V) * HForward - V));
+			H = HForward;
 		}
 		else {
-			L = ImportanceSampleCosWeight(make_float2(noise.x, noise.y), NForward);
+			L = ASSERT_VALID(ImportanceSampleCosWeight(make_float2(noise.x, noise.y), NForward));
+			H = ASSERT_VALID(normalize(V + L));
 		}
-		//if (length(V + L) < FloatEpsilon) {
-		//	float3 d;
-		//	if (abs(L.x) < 1e-4f) {
-		//		d = normalize(make_float3(0, L.z, -L.y));
-		//	}
-		//	else {
-		//		d = normalize(make_float3(L.z, 0, -L.x));
-		//	}
-		//	L += d * 1e-3f;
-		//	L = normalize(L);
-		//}
-		H = ASSERT_VALID(normalize(V + L));
+		L = ASSERT_VALID(ClampRayDir(L, NForward));
 		return ASSERT_VALID(L);
 	}
 }

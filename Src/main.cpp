@@ -165,7 +165,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 1;
+		conf.MaxRayRecursiveDepth = 6;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -572,7 +572,7 @@ void main() {
 			delta_time = duration_cast<milliseconds>(end - start).count();
 			start = end;
 			stringstream ss;
-			ss << "Optix Renderer     FPS:" << 1000.0f / delta_time << endl;
+			ss << "Optix Renderer    fps:" << to_string_with_precision(1000.0f / delta_time,0) <<"    Width: "<< width << "    Height: "<<height << endl;
 			glfwSetWindowTitle(window, ss.str().c_str());
 			FrameNumber++;
 			CUDA_CHECK(cudaStreamSynchronize(Stream));

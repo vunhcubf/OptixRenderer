@@ -58,30 +58,102 @@ DEVICE INLINE void Assert(bool x) {
 #define TMIN 1e-3f
 #define FLOAT_NAN GetNaN()
 
-INLINE DEVICE float Assert_Valid(float a, const char* file, int line) {
+INLINE DEVICE float AssertValid(float a, const char* file, int line) {
 	if (isnan(a) || isinf(a)) {
 		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f.\033[0m ThreadId: %u, %u\n", file, line, a, optixGetLaunchIndex().x, optixGetLaunchIndex().y);
 		Assert(0);
 	}
 	return a;
 }
-INLINE DEVICE float2 Assert_Valid(float2 a, const char* file, int line) {
+INLINE DEVICE float2 AssertValid(float2 a, const char* file, int line) {
 	if (isnan(a) || isinf(a)) {
 		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f.\033[0m ThreadId: %u, %u\n", file, line, a.x, a.y, optixGetLaunchIndex().x, optixGetLaunchIndex().y);
 		Assert(0);
 	}
 	return a;
 }
-INLINE DEVICE float3 Assert_Valid(float3 a, const char* file, int line) {
+INLINE DEVICE float3 AssertValid(float3 a, const char* file, int line) {
 	if (isnan(a) || isinf(a)) {
 		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f  Z:%f.\033[0m ThreadId: %u, %u\n", file, line, a.x, a.y, a.z, optixGetLaunchIndex().x, optixGetLaunchIndex().y);
 		Assert(0);
 	}
 	return a;
 }
-INLINE DEVICE float4 Assert_Valid(float4 a, const char* file, int line) {
+INLINE DEVICE float4 AssertValid(float4 a, const char* file, int line) {
 	if (isnan(a) || isinf(a)) {
 		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f  Z:%f  W:%f.\033[0m ThreadId: %u, %u\n", file, line, a.x, a.y, a.z,a.w, optixGetLaunchIndex().x, optixGetLaunchIndex().y);
+		Assert(0);
+	}
+	return a;
+}
+
+INLINE DEVICE float AssertValidAndReport(float a, float extra, const char* extra_name, const char* file, int line) {
+	if (isnan(a) || isinf(a)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f.\033[0m ThreadId: %u, %u \033[33m(%s: %f)\033[0m\n",
+			file, line, a, optixGetLaunchIndex().x, optixGetLaunchIndex().y, extra_name, extra);
+		Assert(0);
+	}
+	return a;
+}
+
+INLINE DEVICE float2 AssertValidAndReport(float2 a, float2 extra, const char* extra_name, const char* file, int line) {
+	if (isnan(a.x) || isnan(a.y) || isinf(a.x) || isinf(a.y)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f.\033[0m ThreadId: %u, %u \033[33m(%s: X:%f  Y:%f)\033[0m\n",
+			file, line, a.x, a.y, optixGetLaunchIndex().x, optixGetLaunchIndex().y, extra_name, extra.x, extra.y);
+		Assert(0);
+	}
+	return a;
+}
+
+INLINE DEVICE float3 AssertValidAndReport(float3 a, float3 extra, const char* extra_name, const char* file, int line) {
+	if (isnan(a.x) || isnan(a.y) || isnan(a.z) || isinf(a.x) || isinf(a.y) || isinf(a.z)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f  Z:%f.\033[0m ThreadId: %u, %u \033[33m(%s: X:%f  Y:%f  Z:%f)\033[0m\n",
+			file, line, a.x, a.y, a.z, optixGetLaunchIndex().x, optixGetLaunchIndex().y, extra_name, extra.x, extra.y, extra.z);
+		Assert(0);
+	}
+	return a;
+}
+
+INLINE DEVICE float4 AssertValidAndReport(float4 a, float4 extra, const char* extra_name, const char* file, int line) {
+	if (isnan(a.x) || isnan(a.y) || isnan(a.z) || isnan(a.w) || isinf(a.x) || isinf(a.y) || isinf(a.z) || isinf(a.w)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f  Z:%f  W:%f.\033[0m ThreadId: %u, %u \033[33m(%s: X:%f  Y:%f  Z:%f  W:%f)\033[0m\n",
+			file, line, a.x, a.y, a.z, a.w, optixGetLaunchIndex().x, optixGetLaunchIndex().y, extra_name, extra.x, extra.y, extra.z, extra.w);
+		Assert(0);
+	}
+	return a;
+}
+
+INLINE DEVICE float AssertValidAndReport(float a, float extra1, const char* name1, float extra2, const char* name2, const char* file, int line) {
+	if (isnan(a) || isinf(a)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f.\033[0m ThreadId: %u, %u \033[33m(%s: %f, %s: %f)\033[0m\n",
+			file, line, a, optixGetLaunchIndex().x, optixGetLaunchIndex().y, name1, extra1, name2, extra2);
+		Assert(0);
+	}
+	return a;
+}
+
+INLINE DEVICE float2 AssertValidAndReport(float2 a, float2 extra1, const char* name1, float2 extra2, const char* name2, const char* file, int line) {
+	if (isnan(a.x) || isnan(a.y) || isinf(a.x) || isinf(a.y)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f.\033[0m ThreadId: %u, %u \033[33m(%s: X:%f  Y:%f, %s: X:%f  Y:%f)\033[0m\n",
+			file, line, a.x, a.y, optixGetLaunchIndex().x, optixGetLaunchIndex().y, name1, extra1.x, extra1.y, name2, extra2.x, extra2.y);
+		Assert(0);
+	}
+	return a;
+}
+
+INLINE DEVICE float3 AssertValidAndReport(float3 a, float3 extra1, const char* name1, float3 extra2, const char* name2, const char* file, int line) {
+	if (isnan(a.x) || isnan(a.y) || isnan(a.z) || isinf(a.x) || isinf(a.y) || isinf(a.z)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f  Z:%f.\033[0m ThreadId: %u, %u \033[33m(%s: X:%f  Y:%f  Z:%f, %s: X:%f  Y:%f  Z:%f)\033[0m\n",
+			file, line, a.x, a.y, a.z, optixGetLaunchIndex().x, optixGetLaunchIndex().y, name1, extra1.x, extra1.y, extra1.z, name2, extra2.x, extra2.y, extra2.z);
+		Assert(0);
+	}
+	return a;
+}
+
+INLINE DEVICE float4 AssertValidAndReport(float4 a, float4 extra1, const char* name1, float4 extra2, const char* name2, const char* file, int line) {
+	if (isnan(a.x) || isnan(a.y) || isnan(a.z) || isnan(a.w) || isinf(a.x) || isinf(a.y) || isinf(a.z) || isinf(a.w)) {
+		printf("Assertion failed at %s:\033[33m%d\033[0m: \033[36mInput is X:%f  Y:%f  Z:%f  W:%f.\033[0m ThreadId: %u, %u \033[33m(%s: X:%f  Y:%f  Z:%f  W:%f, %s: X:%f  Y:%f  Z:%f  W:%f)\033[0m\n",
+			file, line, a.x, a.y, a.z, a.w, optixGetLaunchIndex().x, optixGetLaunchIndex().y, name1, extra1.x, extra1.y, extra1.z, extra1.w, name2, extra2.x, extra2.y, extra2.z, extra2.w);
 		Assert(0);
 	}
 	return a;
@@ -91,8 +163,12 @@ INLINE DEVICE float4 Assert_Valid(float4 a, const char* file, int line) {
 	(a<0.5f? a-FloatEpsilon : a+FloatEpsilon)
 #define ENABLE_ASSERT
 #ifdef ENABLE_ASSERT
-#define ASSERT_VALID(a) Assert_Valid(a,__FILE__,__LINE__)
+#define ASSERT_VALID_AND_REPORT1(a,name1,e1) AssertValidAndReport(a,e1,name1,__FILE__,__LINE__)
+#define ASSERT_VALID_AND_REPORT2(a,name1,e1,name2,e2) AssertValidAndReport(a,e1,name1,e2,name2,__FILE__,__LINE__)
+#define ASSERT_VALID(a) AssertValid(a,__FILE__,__LINE__)
 #else
+#define ASSERT_VALID_AND_REPORT(a,name1,e1) (a)
+#define ASSERT_VALID_AND_REPORT(a,name1,e1,name2,e2) (a)
 #define ASSERT_VALID(a) (a)
 #endif
 
@@ -502,6 +578,18 @@ static DEVICE float Rand(uint& seed) {
 	return rnd(seed1);
 }
 
+static DEVICE float3 ClampRayDir(float3 RayDir, float3 NForward) {
+	NForward = normalize(NForward);
+	float projection = dot(RayDir, NForward);
+	if (projection < 0) {
+		float3 normalComponent = projection * NForward;
+		float3 tangentComponent = RayDir - normalComponent;
+		RayDir = normalize(tangentComponent + 0.9 * NForward);
+	}
+	return normalize(RayDir);
+}
+
+
 static DEVICE float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
 	float p = rand.x;
 	float theta = rand.y * 2.0f * PI;
@@ -519,15 +607,18 @@ static DEVICE float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
 	B = normalize(B);
 	float3 RayDir = T * sin_phi * cos(theta) + B * sin_phi * sin(theta) + N * fmaxf(cos_phi,FloatEpsilon);
 	RayDir = normalize(RayDir);
-	return RayDir;
+	return ASSERT_VALID(RayDir);
 }
 static DEVICE float3 ImportanceSampleCosWeight(uint& Seed, float3 N) {
 	float phi = Rand(Seed);
 	float theta = Rand(Seed);
-	return ImportanceSampleCosWeight(make_float2(phi, theta), N);
+	return ASSERT_VALID(ImportanceSampleCosWeight(make_float2(phi, theta), N));
 }
 static DEVICE float3 ImportanceSampleGGX(float2 Xi, float roughness)
 {
+	if (roughness < 5e-2f) {
+		return make_float3(0, 0, 1);
+	}
 	Xi.y = fminf(Xi.y, 0.999999f);
 	float a = roughness * roughness;
 	float phi = 2.0 * PI * Xi.x;
@@ -542,20 +633,20 @@ static DEVICE float3 ImportanceSampleGGX(float2 Xi, float roughness)
 	H.x = cos(phi) * sinTheta;
 	H.y = sin(phi) * sinTheta;
 	H.z = cosTheta;
-	return H;
+	return ASSERT_VALID(H);
 }
 static DEVICE float3 ImportanceSampleGGX(uint& Seed, float roughness)
 {
 	float2 Xi;
 	Xi.x = Rand(Seed);
 	Xi.y = Rand(Seed);
-	return ImportanceSampleGGX(Xi, roughness);
+	return ASSERT_VALID(ImportanceSampleGGX(Xi, roughness));
 }
 DEVICE float3 LocalToWorld(float3 H,float3 N) {
 	float3 T, B;
 	GetTBNFromN(N, T, B);
 	H = T * H.x + B * H.y + N * H.z;
-	return H;
+	return ASSERT_VALID(H);
 }
 static DEVICE float3 ImportanceSampleGGX(float2 noise, float roughness, float3 N) {
 	float3 H = ImportanceSampleGGX(noise, roughness);
@@ -564,7 +655,7 @@ static DEVICE float3 ImportanceSampleGGX(float2 noise, float roughness, float3 N
 		GetTBNFromN(N, T, B);
 		H = T * H.x + B * H.y + N * H.z;
 		H = normalize(H);
-		return H;
+		return ASSERT_VALID(H);
 	}
 }
 
@@ -576,7 +667,7 @@ static DEVICE float3 ClmapRayDir(const float3& n, float3 l) {
 	L = normalize(L);
 	L = T * L.x + B * L.y + n * L.z;
 	L = normalize(L);
-	return L;
+	return ASSERT_VALID(L);
 }
 static INLINE DEVICE float3 UseNormalMap(float3 N,float3 NormalMap,float Intensity) {
 	float3 T;
@@ -593,7 +684,7 @@ static INLINE DEVICE float3 UseNormalMap(float3 N,float3 NormalMap,float Intensi
 	float3 N_new = NormalMap.x * T + NormalMap.y * BT + NormalMap.z * N;
 	N = lerp(N, N_new, Intensity);
 	N = normalize(N);
-	return N;
+	return ASSERT_VALID(N);
 }
 static DEVICE float3 refract(const float3 incident, const float3 normal, const float eta,bool* internal_reflection)
 {
@@ -605,7 +696,7 @@ static DEVICE float3 refract(const float3 incident, const float3 normal, const f
 		return make_float3(0);
 	}	
 	else
-		return eta * incident - (eta * dot(normal, incident) + sqrt(k)) * normal;
+		return ASSERT_VALID(eta * incident - (eta * dot(normal, incident) + sqrt(k)) * normal);
 }
 
 DEVICE INLINE float UintAsFloat(uint& a) {
@@ -702,7 +793,7 @@ struct SurfaceData{
 			Metallic = ModelDataptr->MaterialData->Metallic;
 		}
 		BaseColor *= AO;
-		Roughness = fmaxf(Roughness, 5e-2f);// 更低的阈值不能通过熔炉测试
+		Roughness = fmaxf(Roughness, 1e-2f);// 更低的阈值不能通过熔炉测试
 		Transmission = ModelDataptr->MaterialData->Transmission;
 		ior = ModelDataptr->MaterialData->Ior;
 		ior = fmaxf(ior, 1.0001f);
@@ -729,7 +820,6 @@ DEVICE  INLINE T* GetSbtDataPointer(CUdeviceptr d) {
 
 DEVICE float3 GetSkyBoxColor(CUdeviceptr dataptr, float3 RayDirection) {
 	MissData* data = (MissData*)dataptr;
-
 	float2 SkyBoxUv = ASSERT_VALID(GetSkyBoxUv(RayDirection));
 
 	if (IsTextureViewValid(data->SkyBox)) {
