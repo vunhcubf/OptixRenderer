@@ -143,7 +143,21 @@ struct LaunchParameters {
 	CUdeviceptr LightListArrayptr;
 	uint LightListLength;
 	ConsoleOptions* consoleOptions;
-	uint* DomeLightBuffer;
+	void* DomeLightBuffer;
+};
+
+struct DomeLightISStruct {
+	int width = 0;
+	int height = 0;
+
+	float* rowQ;      // height * width
+	int* rowAlias;  // height * width
+
+	float* colQ;      // height
+	int* colAlias;  // height
+
+	float* pdfMarginal;
+	float* pdfRow;
 };
 #define CONSOLE_OPTIONS (RayTracingGlobalParams.consoleOptions)
 
@@ -313,7 +327,7 @@ INLINE DEVICE float4 AssertValidAndReport(float4 a, float4 extra1, const char* n
 
 #define SAFETY_MARGIN(a)\
 	(a<0.5f? a-FloatEpsilon : a+FloatEpsilon)
-#define ENABLE_ASSERT
+//#define ENABLE_ASSERT
 #ifdef ENABLE_ASSERT
 #define ASSERT_VALID_AND_REPORT1(a,name1,e1) AssertValidAndReport(a,e1,name1,__FILE__,__LINE__)
 #define ASSERT_VALID_AND_REPORT2(a,name1,e1,name2,e2) AssertValidAndReport(a,e1,name1,e2,name2,__FILE__,__LINE__)
@@ -628,7 +642,7 @@ static DEVICE float3 ImportanceSampleGGX(float2 Xi, float roughness)
 	if (roughness < 5e-2f) {
 		return make_float3(0, 0, 1);
 	}
-	Xi.y = fminf(Xi.y, 0.999999f);
+	Xi.y = fminf(Xi.y, 0.99f);
 	float a = roughness * roughness;
 	float phi = 2.0 * PI * Xi.x;
 	float numerator = (1.0 - Xi.y);
@@ -833,7 +847,7 @@ DEVICE float3 GetSkyBoxColor(CUdeviceptr dataptr, float3 RayDirection) {
 
 	if (IsTextureViewValid(data->SkyBox)) {
 		float4 skybox = ASSERT_VALID(SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y));
-		return ASSERT_VALID(make_float3(skybox.x, skybox.y, skybox.z));
+		return ASSERT_VALID((make_float3(skybox.x, skybox.y, skybox.z)));
 	}
 	else {
 		return ASSERT_VALID(data->BackgroundColor * data->SkyBoxIntensity);

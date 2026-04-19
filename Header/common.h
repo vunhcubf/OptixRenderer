@@ -22,6 +22,14 @@
 #include "cuda.h"
 #include "cuda_runtime.h"
 
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <algorithm>
+#include <random>
+#include <type_traits>
+
+
 #define DEVICE __device__
 #define HOST __host__
 
@@ -179,7 +187,7 @@ struct LaunchParameters {
     CUdeviceptr LightListArrayptr;
     uint LightListLength;
     ConsoleOptions* consoleOptions;
-    uint* DomeLightBuffer;
+    void* DomeLightBuffer;
 };
 struct ModelData {
     GeometryBuffer* GeometryData;

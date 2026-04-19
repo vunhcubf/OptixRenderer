@@ -9,6 +9,7 @@
 #include <windows.h>
 #include "Light.h"
 #include "EMSample.h"
+#include "EMSample.cuh"
 extern "C" void GenerateQuantificationPrefixSumLookupTable_float4(float4* data, uint w, uint h, uint * &QuantificationProb, uint * &SampleIndex, bool debug = false);
 extern "C" void GenerateQuantificationPrefixSumLookupTable(double* data, uint w, uint h, uint * &QuantificationProb, uint * &SampleIndex, bool debug = false);
 
@@ -71,7 +72,6 @@ void main() {
 		{
 
 			for (auto& shader_to_compile_inst : shader_sources) {
-				//std::cout << "正在编译着色器：" << shader_to_compile_inst.first << endl;
 				compilationOutput << "正在编译着色器：" << shader_to_compile_inst.first << "\n";
 				nvrtcProgram prog;
 				nvrtcCreateProgram(&prog,             // 程序
@@ -126,34 +126,72 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		const char* skybox_path = "/Assets/Textures/kloofendal_48d_partly_cloudy_puresky_2k.exr";
+		const char* skybox_path = "/Assets/Textures/studio_small_05_2k.exr";
 		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + skybox_path);
 		// Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/black.png");
 
-		// 构建dome light
-		UniquePtrDevice DomeLightDeviceBuffer;
+		//构建dome light
+		UniquePtrDevice DomeLightBuffer;
+		UniquePtrDevice DomeLightBuffer_rowAlias;
+		UniquePtrDevice DomeLightBuffer_rowQ;
+		UniquePtrDevice DomeLightBuffer_colAlias;
+		UniquePtrDevice DomeLightBuffer_colQ;
+		UniquePtrDevice DomeLightBuffer_pdfMarginal;
+		UniquePtrDevice DomeLightBuffer_pdfRow;
 		{
 			std::cout << "从" << skybox_path << "构建dome light" << endl;
 			if (skybox.GetTextureView().textureFormat != TEXTURE_FORMAT_FLOAT4) {
-				std::cerr << "请使用hdr环境贴图" << endl;
-				system("pause");
+		 		std::cerr << "请使用hdr环境贴图" << endl;
+		 		system("pause");
 			}
 			uint w, h;
 			float4* h_image = ReadOpenExr((ProjectPath + skybox_path).c_str(), w, h);
-			CUDA_CHECK(cudaMalloc(DomeLightDeviceBuffer.GetAddressOfPtr(), sizeof(uint) * (2 * w * h + 2)));
-			uint* QuantifiedProb = (uint*)malloc(sizeof(uint) * w * h);
-			uint* SampleIndex = (uint*)malloc(sizeof(uint) * w * h);
-			GenerateQuantificationPrefixSumLookupTable_float4(h_image, w, h, QuantifiedProb, SampleIndex, false);
-			// 打包成一个很长的buffer ,分别是w,h,prob,index
-			uint* DomeLightBuffer = (uint*)malloc(sizeof(uint) * (w * h * 2 + 2));
-			memcpy(DomeLightBuffer, &w, sizeof(uint));
-			memcpy(DomeLightBuffer + 1, &h, sizeof(uint));
-			memcpy(DomeLightBuffer + 2, QuantifiedProb, sizeof(uint) * w * h);
-			memcpy(DomeLightBuffer + 2 + w * h, SampleIndex, sizeof(uint) * w * h);
-			free(h_image);
-			free(QuantifiedProb);
-			free(SampleIndex);
-			CUDA_CHECK(cudaMemcpy(DomeLightDeviceBuffer.GetPtr(), DomeLightBuffer, sizeof(uint) * (w * h * 2 + 2),cudaMemcpyHostToDevice));
+			// 拿到图片以后池化再取对数
+			// 图片压缩为256x128的大小，取亮度的ln(x+1)作为概率并归一化
+			// 最后得到两个buffer
+			// 一个是行内的cdf，一个是行间的cdf
+
+			// 首先申请照度的buffer
+			UniquePtrDevice luminanceBuffer;
+			CUDA_CHECK(cudaMalloc(luminanceBuffer.GetAddressOfPtr(), sizeof(float) * 128 * 256));
+			DownSampleAndGetLuminance((float*)luminanceBuffer.GetPtr(), h_image, w, h);
+
+			// 1. 从 device 拷回未归一化 luminance
+			std::vector<float> h_luminance = CopyFloatImageFromDevice((float*)luminanceBuffer.GetPtr(), DST_W, DST_H);
+
+			// 2. CPU 构建 alias table
+			EnvAliasTables tables = BuildEnvAliasTablesFromLuminance(h_luminance.data(), DST_W, DST_H);
+
+			// 申请5个buffer
+			CUDA_CHECK(cudaMalloc(DomeLightBuffer.GetAddressOfPtr(), sizeof(DomeLightISStruct) ));
+			CUDA_CHECK(cudaMalloc(DomeLightBuffer_rowQ.GetAddressOfPtr(), sizeof(float) * tables.width * tables.height));
+			CUDA_CHECK(cudaMalloc(DomeLightBuffer_colQ.GetAddressOfPtr(), sizeof(float) * tables.height));
+			CUDA_CHECK(cudaMalloc(DomeLightBuffer_colAlias.GetAddressOfPtr(), sizeof(int) * tables.height));
+			CUDA_CHECK(cudaMalloc(DomeLightBuffer_rowAlias.GetAddressOfPtr(), sizeof(int) * tables.width * tables.height));
+			// 装有pdf的两个buffer
+			CUDA_CHECK(cudaMalloc(DomeLightBuffer_pdfRow.GetAddressOfPtr(), sizeof(float) * tables.width * tables.height));
+			CUDA_CHECK(cudaMalloc(DomeLightBuffer_pdfMarginal.GetAddressOfPtr(), sizeof(float) * tables.height));
+			CUDA_CHECK(cudaDeviceSynchronize());
+			// 上传4个buffer
+			CUDA_CHECK(cudaMemcpy(DomeLightBuffer_rowQ.GetPtr(), tables.rowQ.data(), sizeof(float) * tables.width * tables.height, cudaMemcpyHostToDevice));
+			CUDA_CHECK(cudaMemcpy(DomeLightBuffer_colQ.GetPtr(), tables.colQ.data(), sizeof(float) * tables.height, cudaMemcpyHostToDevice));
+			CUDA_CHECK(cudaMemcpy(DomeLightBuffer_colAlias.GetPtr(), tables.colAlias.data(), sizeof(int) * tables.height, cudaMemcpyHostToDevice));
+			CUDA_CHECK(cudaMemcpy(DomeLightBuffer_rowAlias.GetPtr(), tables.rowAlias.data(), sizeof(int)* tables.width* tables.height, cudaMemcpyHostToDevice));
+
+			CUDA_CHECK(cudaMemcpy(DomeLightBuffer_pdfRow.GetPtr(), tables.pdfRow.data(), sizeof(float)* tables.width* tables.height, cudaMemcpyHostToDevice));
+			CUDA_CHECK(cudaMemcpy(DomeLightBuffer_pdfMarginal.GetPtr(), tables.pdfMarginal.data(), sizeof(float)* tables.height, cudaMemcpyHostToDevice));
+			DomeLightISStruct tempStruct = {};
+			tempStruct.width = tables.width;
+			tempStruct.height = tables.height;
+			tempStruct.colAlias = (int*)DomeLightBuffer_colAlias.GetPtr();
+			tempStruct.rowAlias = (int*)DomeLightBuffer_rowAlias.GetPtr();
+			tempStruct.colQ = (float*)DomeLightBuffer_colQ.GetPtr();
+			tempStruct.rowQ = (float*)DomeLightBuffer_rowQ.GetPtr();
+			tempStruct.pdfRow = (float*)DomeLightBuffer_pdfRow.GetPtr();
+			tempStruct.pdfMarginal = (float*)DomeLightBuffer_pdfMarginal.GetPtr();
+			// 上传装配好的buffer
+			CUDA_CHECK(cudaMemcpy(DomeLightBuffer.GetPtr(), &tempStruct, sizeof(DomeLightISStruct), cudaMemcpyHostToDevice));
+			CUDA_CHECK(cudaDeviceSynchronize());
 		}
 		TextureManager::GetInstance().Add("skybox", skybox);
 		uint KeyBoardActionBitMask = 0U;
@@ -165,7 +203,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 1;
+		conf.MaxRayRecursiveDepth = 16;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -210,15 +248,15 @@ void main() {
 				rectangleLight1.PackMaterialBuffer(),
 				{ "HitGroup_fetchHitInfo_proceduralgeo_rectangle_light" }, true);
 		}
-		//{
-		//	SphereLight SphereLight1(
-		//		make_float3(-8.2, -2.76, 0.562), 0.15, make_float3(1, 0.3, 0.3), 200);
-		//	string name = "sphere_light1";
-		//	scene.AddProceduralObject(
-		//		name, SphereLight1.GetAabb(),
-		//		SphereLight1.PackMaterialBuffer(),
-		//		{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
-		//}
+		{
+			SphereLight SphereLight1(
+				make_float3(-8.2, -2.76, 0.562), 0.15, make_float3(1, 0.3, 0.3), 200);
+			string name = "sphere_light1";
+			scene.AddProceduralObject(
+				name, SphereLight1.GetAabb(),
+				SphereLight1.PackMaterialBuffer(),
+				{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
+		}
 		const float R[7] = { 1.0, 1.0, 1.0, 0.05, 0.05, 0.05, 0.58 };  // 红色分量
 		const float G[7] = { 0.05, 0.65, 1.0, 1.0, 1.0, 0.05, 0.05 };  // 绿色分量
 		const float B[7] = { 0.05, 0.05, 0.05, 0.05, 1.0, 1.0, 0.83 };  // 蓝色分量
@@ -254,14 +292,15 @@ void main() {
 		//帧计数器
 		uint64 FrameCounter = 0;
 		//相机数据在lparams中的地址偏移
-		LaunchParameters* p = nullptr;
-		uint64 AddressBiasOfFrameNumberInLaunchParams = (uint64)(&p->FrameNumber) - (uint64)(p);
-		uint64 AddressBiasOfCameraDataInLaunchParams = (uint64)(&p->cameraData) - (uint64)(p);
-		uint64 AddressBiasOfConsoleOptions = (uint64)(&p->consoleOptions) - (uint64)(p);
-		uint64 AddressBiasOfSeedInLaunchParams = (uint64)(&p->Seed) - (uint64)(p);
-		uint64 AddressBiasOfHeightInLaunchParams = (uint64)(&p->Height) - (uint64)(p);
-		uint64 AddressBiasOfWidthInLaunchParams = (uint64)(&p->Width) - (uint64)(p);
-		uint64 AddressBiasOfIndirectOutputBufferInLaunchParams = (uint64)(&p->IndirectOutputBuffer) - (uint64)(p);
+		// 应当禁止这种操作!
+		//LaunchParameters* p = nullptr;
+		//uint64 AddressBiasOfFrameNumberInLaunchParams = (uint64)(&p->FrameNumber) - (uint64)(p);
+		//uint64 AddressBiasOfCameraDataInLaunchParams = (uint64)(&p->cameraData) - (uint64)(p);
+		//uint64 AddressBiasOfConsoleOptions = (uint64)(&p->consoleOptions) - (uint64)(p);
+		//uint64 AddressBiasOfSeedInLaunchParams = (uint64)(&p->Seed) - (uint64)(p);
+		//uint64 AddressBiasOfHeightInLaunchParams = (uint64)(&p->Height) - (uint64)(p);
+		//uint64 AddressBiasOfWidthInLaunchParams = (uint64)(&p->Width) - (uint64)(p);
+		//uint64 AddressBiasOfIndirectOutputBufferInLaunchParams = (uint64)(&p->IndirectOutputBuffer) - (uint64)(p);
 		//创建渲染纹理用于帧结果累计
 		//希望渲染纹理不要频繁申请释放
 		const uint expected_max_width = (uint)GetSystemMetrics(SM_CXSCREEN);
@@ -355,7 +394,7 @@ void main() {
 		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
 		glEnableVertexAttribArray(1);
 
-
+		auto initialTime = high_resolution_clock::now();
 
 		// uncomment this call to draw in wireframe polygons.
 		//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
@@ -409,6 +448,10 @@ void main() {
 			glfwGetWindowSize(window, &width, &height);
 			glViewport(0, 0, width, height);
 			if (prev_width != width || prev_height != height && accumulate_frame_mode!=0) {
+				// 先拷贝下来
+				LaunchParameters LParamsHost;
+				CUDA_CHECK(cudaMemcpyAsync(&LParamsHost, LParams.GetPtr(), sizeof(LaunchParameters), cudaMemcpyDeviceToHost, Stream));
+				CUDA_CHECK(cudaStreamSynchronize(Stream));
 				prev_width = width;
 				prev_height = height;
 				//先删除资源
@@ -429,17 +472,11 @@ void main() {
 
 				cudaGraphicsGLRegisterBuffer(&cuda_pbo_resource, pbo, cudaGraphicsMapFlagsWriteDiscard);
 				//重新设置launchparams
-				uint64 BiasedAddress = (uint64)LParams.GetPtr() + AddressBiasOfWidthInLaunchParams;
-				uint temp;
-				temp = width;
-				CUDA_CHECK(cudaMemcpyAsync((void*)BiasedAddress, &temp, sizeof(uint), cudaMemcpyHostToDevice, Stream));
-				temp = height;
-				BiasedAddress = (uint64)LParams.GetPtr() + AddressBiasOfHeightInLaunchParams;
-				CUDA_CHECK(cudaMemcpyAsync((void*)BiasedAddress, &temp, sizeof(uint), cudaMemcpyHostToDevice, Stream));
+				LParamsHost.Width = width;
+				LParamsHost.Height = height;
 				//重新设置相机数据
-				BiasedAddress = (uint64)LParams.GetPtr() + AddressBiasOfCameraDataInLaunchParams;
 				CameraData data = camera.ExportCameraData(width, height);
-				CUDA_CHECK(cudaMemcpyAsync((void*)BiasedAddress, &data, sizeof(CameraData), cudaMemcpyHostToDevice, Stream));
+				LParamsHost.cameraData = data;
 				//重新创建FrameBuffer2
 				//重新累计
 				FrameCounter = 0;
@@ -449,9 +486,10 @@ void main() {
 					CUDA_CHECK(cudaFree(FrameBuffer3.GetPtr()));
 					CUDA_CHECK(cudaMalloc(FrameBuffer3.GetAddressOfPtr(), sizeof(float3) * width * height));
 					//更新lparams中的参数
-					CUdeviceptr temp = (CUdeviceptr)FrameBuffer2.GetPtr();
-					CUDA_CHECK(cudaMemcpyAsync((void*)((uint64)LParams.GetPtr() + AddressBiasOfIndirectOutputBufferInLaunchParams), &temp, sizeof(CUdeviceptr), cudaMemcpyHostToDevice, Stream));
+					LParamsHost.IndirectOutputBuffer= (float3*)FrameBuffer2.GetPtr();
 				}
+				CUDA_CHECK(cudaDeviceSynchronize());
+				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &LParamsHost, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
 			}
 			//处理键鼠输入
 			SetState(KeyBoardActionBitMask, INPUT_TYPE::W, glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
@@ -487,32 +525,38 @@ void main() {
 				params.MaxRecursionDepth = scene.GetMaxRecursionDepth();
 				params.IndirectOutputBuffer = (float3*)FrameBuffer2.GetPtr();
 				params.consoleOptions = consoleOptionsDevice;
-				params.DomeLightBuffer = (uint*)DomeLightDeviceBuffer.GetPtr();
+				params.DomeLightBuffer = DomeLightBuffer.GetPtr();
 				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &params, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
 			}
 
 			//开始渲染逻辑
 			//更新lparams
-			if (KeyBoardActionBitMask || MouseActionBitMask ) {
-				if(accumulate_frame_mode != 0)
-					FrameCounter = 0;
-				camera.Update(delta_time,
-					KeyBoardActionBitMask,
-					MouseActionBitMask,
-					MousePos,
-					MousePosPrev);
-				//只拷贝相机数据
-				CameraData data = camera.ExportCameraData(width, height);
-				uint64 BiasedAddressOfParams = (uint64)LParams.GetPtr() + AddressBiasOfCameraDataInLaunchParams;
-				CUDA_CHECK(cudaMemcpyAsync((void*)BiasedAddressOfParams, &data, sizeof(CameraData), cudaMemcpyHostToDevice, Stream));
+			{
+				LaunchParameters LParamsHost;
+				CUDA_CHECK(cudaMemcpyAsync(&LParamsHost, LParams.GetPtr(), sizeof(LaunchParameters), cudaMemcpyDeviceToHost, Stream));
+				CUDA_CHECK(cudaStreamSynchronize(Stream));
+				if (KeyBoardActionBitMask || MouseActionBitMask) {
+					if (accumulate_frame_mode != 0)
+						FrameCounter = 0;
+					camera.Update(delta_time,
+						KeyBoardActionBitMask,
+						MouseActionBitMask,
+						MousePos,
+						MousePosPrev);
+					//只拷贝相机数据
+					CameraData data = camera.ExportCameraData(width, height);
+					LParamsHost.cameraData = data;
+					
+				}
+				//拷贝随机种
+				uint seed = static_cast<uint>(rand());
+				LParamsHost.Seed = seed;
+				LParamsHost.FrameNumber = FrameNumber;
+				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &LParamsHost, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
+				CUDA_CHECK(cudaStreamSynchronize(Stream));
+				CUDA_CHECK(cudaGetLastError());
+				scene.DispatchRays(devPtr, Stream, (LaunchParameters*)LParams.GetPtr(), width, height);
 			}
-			//拷贝随机种
-			uint64 BiasedAddressOfParams = (uint64)LParams.GetPtr() + AddressBiasOfSeedInLaunchParams;
-			uint seed = static_cast<uint>(rand());
-			CUDA_CHECK(cudaMemcpyAsync((void*)BiasedAddressOfParams, &seed, sizeof(uint), cudaMemcpyHostToDevice, Stream));
-			CUDA_CHECK(cudaMemcpyAsync((void*)((uint64)LParams.GetPtr() + AddressBiasOfFrameNumberInLaunchParams), &FrameNumber, sizeof(uint64), cudaMemcpyHostToDevice, Stream));
-			CUDA_CHECK(cudaGetLastError());
-			scene.DispatchRays(devPtr, Stream, (LaunchParameters*)LParams.GetPtr(), width, height);
 
 			//希望当相机不动时累计结果
 			{
@@ -560,7 +604,13 @@ void main() {
 			ImGui::NewFrame();
 
 			ImGui::Begin("Debug Console");
-
+			if (ImGui::Button("Capture"))
+			{
+				std::cout << "截取屏幕" << std::endl;
+				uchar4* FrameBufferHost = (uchar4*)malloc(sizeof(uchar4) * width * height);
+				CUDA_CHECK(cudaMemcpy(FrameBufferHost, devPtr, sizeof(uchar4) * width * height, cudaMemcpyDeviceToHost));
+				SaveUchar4Image(FrameBufferHost, width, height, ("D:/OptixRenderer/ScreenShot/" + GetTimeString()+".png").c_str());
+			}
 			ImGui::Combo("Debug Mode", &debug_mode_current_item, debugModeItems, IM_ARRAYSIZE(debugModeItems));
 			ImGui::Combo("Frame Accumulation Mode", &accumulate_frame_mode, frameAccumulationItems, IM_ARRAYSIZE(frameAccumulationItems));
 			ImGui::End();
@@ -572,7 +622,8 @@ void main() {
 			delta_time = duration_cast<milliseconds>(end - start).count();
 			start = end;
 			stringstream ss;
-			ss << "Optix Renderer    fps:" << to_string_with_precision(1000.0f / delta_time,0) <<"    Width: "<< width << "    Height: "<<height << endl;
+			auto elapsed = duration_cast<seconds>(high_resolution_clock::now() - initialTime).count();
+			ss << "Optix Renderer  fps:" << to_string_with_precision(1000.0f / delta_time,0) <<" W: "<< width << " H: "<<height << " Time elapsed:" << elapsed << endl;
 			glfwSetWindowTitle(window, ss.str().c_str());
 			FrameNumber++;
 			CUDA_CHECK(cudaStreamSynchronize(Stream));

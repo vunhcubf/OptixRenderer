@@ -224,31 +224,71 @@ DEVICE float PdfLight(uint lightIndex, float3 shadingPoint, float3 rayDir) {
 }
 
 // 关于dome light的代码
-DEVICE float3 SampleDomeLight(float rnd) {
-    uint*& domeLightBuffer = RayTracingGlobalParams.DomeLightBuffer;
-    uint w = domeLightBuffer[0];
-    uint h = domeLightBuffer[1];
-    rnd = saturate(rnd);
-    uint i = floor(rnd * w * h);
-    i = min(i, w * h - 1);
-    i += 2;
-    uint index = domeLightBuffer[i];
-    float2 uv = make_float2(index / h + 0.5, index % h + 0.5);
-    uv.x /= w;
-    uv.y /= h;
-    float3 rayDir= GetRayDirFromSkyBoxUv(uv);
+DEVICE float3 SampleDomeLight(float4 rnd) {
+    DomeLightISStruct* domeLightBuffer = (DomeLightISStruct*)RayTracingGlobalParams.DomeLightBuffer;
+    DomeLightISStruct dome = domeLightBuffer[0];
+    // ---------- sample row ----------
+    int rowIdx = (int)(rnd.x * dome.height);
+    if (rowIdx >= dome.height) rowIdx = dome.height - 1;
+    if (rowIdx < 0) rowIdx = 0;
+
+    int row;
+    if (rnd.y < dome.colQ[rowIdx])
+        row = rowIdx;
+    else
+        row = dome.colAlias[rowIdx];
+    // ---------- sample col ----------
+    int colIdx = (int)(rnd.z * dome.width);
+    if (colIdx >= dome.width) colIdx = dome.width - 1;
+    if (colIdx < 0) colIdx = 0;
+
+    int offset = row * dome.width + colIdx;
+
+    int col;
+    if (rnd.w < dome.rowQ[offset])
+        col = colIdx;
+    else
+        col = dome.rowAlias[offset];
+    // ---------- texel center -> uv ----------
+    float u = ((float)col + 0.5f) / (float)dome.width;
+    float v = ((float)row + 0.5f) / (float)dome.height;
+
+    float3 rayDir= GetRayDirFromSkyBoxUv(make_float2(u,v));
     return rayDir;
 }
 DEVICE float GetDomeLightProb(float3 RayDir) {
-    uint*& domeLightBuffer = RayTracingGlobalParams.DomeLightBuffer;
-    uint w = domeLightBuffer[0];
-    uint h = domeLightBuffer[1];
+    DomeLightISStruct* domeLightBuffer =
+        (DomeLightISStruct*)RayTracingGlobalParams.DomeLightBuffer;
+    DomeLightISStruct dome = domeLightBuffer[0];
 
     float2 uv = GetSkyBoxUv(RayDir);
-    uint primitiveId = floor(uv.y * h) + h * floor(uv.x * w);
-    primitiveId += 2 + w * h;
-    float prob = domeLightBuffer[primitiveId] / (float)(w * h);
-    prob = fmaxf(prob, 1e-7);
-    prob /= (2 * PI_2 * sin(PI * uv.y) + 1e-4);
-    return prob;
+    int col = (int)(uv.x * dome.width);
+    int row = (int)(uv.y * dome.height);
+    if (col >= dome.width)  col = dome.width - 1;
+    if (col < 0)            col = 0;
+    if (row >= dome.height) row = dome.height - 1;
+    if (row < 0)            row = 0;
+
+    float pRow = dome.pdfMarginal[row];
+    float pColGivenRow = dome.pdfRow[row * dome.width + col];
+    float pTexel = pRow * pColGivenRow;
+    if (pTexel <= 0.0f)
+        return 0.0f;
+
+    float vCenter = ((float)row + 0.5f) / (float)dome.height;
+    float theta = PI * (1.0f - vCenter);
+
+    float sinTheta = sinf(theta);
+    if (sinTheta <= 1e-8f)
+        return 0.0f;
+
+    float deltaTheta = PI / (float)dome.height;
+    float deltaPhi = 2.0f * PI / (float)dome.width;
+    float solidAngle = sinTheta * deltaTheta * deltaPhi;
+
+    if (!(solidAngle > 0.0f))
+        return 0.0f;
+
+    // 6. 返回对立体角 pdf
+    return pTexel / solidAngle;
 }
