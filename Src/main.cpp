@@ -10,8 +10,6 @@
 #include "Light.h"
 #include "EMSample.h"
 #include "EMSample.cuh"
-extern "C" void GenerateQuantificationPrefixSumLookupTable_float4(float4* data, uint w, uint h, uint * &QuantificationProb, uint * &SampleIndex, bool debug = false);
-extern "C" void GenerateQuantificationPrefixSumLookupTable(double* data, uint w, uint h, uint * &QuantificationProb, uint * &SampleIndex, bool debug = false);
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #define GLFW_EXPOSE_NATIVE_WGL
@@ -22,12 +20,25 @@ extern "C" void GenerateQuantificationPrefixSumLookupTable(double* data, uint w,
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 const char* debugModeItems[] = {
-	"NoDebug", "MIS"
+	"NoDebug", 
+	"PrimaryRayHitObject",
+	"FirstBsdfRayHitObject",
+	"SecondBsdfRayHitObject",
+	"ThirdBsdfRayHitObject",
+
+	"FirstNEERayHitObject",
+	"SecondNEERayHitObject",
+	"ThirdNEERayHitObject",
+
+	"FinalBsdfRayHitObject",
+	"FinalRadianceIndirect",
+	"FinalRadianceDirect",
+	"FinalWeight",
+	"FinalWeightClip"
 };
 const char* frameAccumulationItems[] = {
 	"ForceOn", "ForceOff", "Auto"
 };
-
 
 using namespace sutil;
 static const char* vertexShaderSource = "#version 330 core\n"
@@ -126,8 +137,8 @@ void main() {
 
 		}
 		std::cout << compilationOutput.str() << std::endl;
-		const char* skybox_path = "/Assets/Textures/studio_small_05_2k.exr";
-		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + skybox_path);
+		const char* skybox_path = "/Assets/Textures/autumn_field_puresky_2k.exr";
+		Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/autumn_field_puresky_2k.exr");
 		// Texture2D skybox = Texture2D::LoadImageFromFile(ProjectPath + "/Assets/Textures/black.png");
 
 		//构建dome light
@@ -145,7 +156,7 @@ void main() {
 		 		system("pause");
 			}
 			uint w, h;
-			float4* h_image = ReadOpenExr((ProjectPath + skybox_path).c_str(), w, h);
+			float4* h_image = ReadOpenExr((ProjectPath+skybox_path).c_str(), w, h);
 			// 拿到图片以后池化再取对数
 			// 图片压缩为256x128的大小，取亮度的ln(x+1)作为概率并归一化
 			// 最后得到两个buffer
@@ -154,13 +165,15 @@ void main() {
 			// 首先申请照度的buffer
 			UniquePtrDevice luminanceBuffer;
 			CUDA_CHECK(cudaMalloc(luminanceBuffer.GetAddressOfPtr(), sizeof(float) * 128 * 256));
+			
 			DownSampleAndGetLuminance((float*)luminanceBuffer.GetPtr(), h_image, w, h);
 
+			//ShowImage<float4>((float4*)h_image, w, h, false,"",false,false,false,false);
 			// 1. 从 device 拷回未归一化 luminance
 			std::vector<float> h_luminance = CopyFloatImageFromDevice((float*)luminanceBuffer.GetPtr(), DST_W, DST_H);
 
 			// 2. CPU 构建 alias table
-			EnvAliasTables tables = BuildEnvAliasTablesFromLuminance(h_luminance.data(), DST_W, DST_H);
+			EnvAliasTables tables = BuildEnvAliasTablesFromLuminance(h_luminance, DST_W, DST_H);
 
 			// 申请5个buffer
 			CUDA_CHECK(cudaMalloc(DomeLightBuffer.GetAddressOfPtr(), sizeof(DomeLightISStruct) ));
@@ -203,7 +216,7 @@ void main() {
 		scene.WarmUp();
 		RayTracingConfig conf;
 		conf.NumSbtRecords = 1;
-		conf.MaxRayRecursiveDepth = 16;
+		conf.MaxRayRecursiveDepth = 8;
 		conf.MaxSceneTraversalDepth = 2;
 		conf.pipelineCompileOptions = CreatePipelineCompileOptions(OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_ANY, 16, 2);
 		scene.SetRayTracingConfig(conf);
@@ -234,6 +247,19 @@ void main() {
 				scene.AddObjects(desc, name);
 			}
 		}
+		{
+			ObjLoadResult sponza = LoadObj(ProjectPath + "/Assets/Models/Sponza/sponza.obj");
+			for (const auto& one : sponza) {
+				const string& name = one.first;
+				const Mesh& mesh = one.second.first;
+				const Material& mat = one.second.second;
+				ObjectDesc desc;
+				desc.mesh = mesh;
+				desc.mat = mat;
+				desc.shaders = { "HitGroup_fetchHitInfo" };
+				scene.AddObjects(desc, name);
+			}
+		}
 		
 		{
 			float3 corner = make_float3(0.2, 0.2, 1.3);
@@ -248,15 +274,15 @@ void main() {
 				rectangleLight1.PackMaterialBuffer(),
 				{ "HitGroup_fetchHitInfo_proceduralgeo_rectangle_light" }, true);
 		}
-		{
-			SphereLight SphereLight1(
-				make_float3(-8.2, -2.76, 0.562), 0.15, make_float3(1, 0.3, 0.3), 200);
-			string name = "sphere_light1";
-			scene.AddProceduralObject(
-				name, SphereLight1.GetAabb(),
-				SphereLight1.PackMaterialBuffer(),
-				{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
-		}
+		//{
+		//	SphereLight SphereLight1(
+		//		make_float3(-8.2, -2.76, 0.562), 0.15, make_float3(1, 0.3, 0.3), 200);
+		//	string name = "sphere_light1";
+		//	scene.AddProceduralObject(
+		//		name, SphereLight1.GetAabb(),
+		//		SphereLight1.PackMaterialBuffer(),
+		//		{ "HitGroup_fetchHitInfo_proceduralgeo_sphere_light" }, true);
+		//}
 		const float R[7] = { 1.0, 1.0, 1.0, 0.05, 0.05, 0.05, 0.58 };  // 红色分量
 		const float G[7] = { 0.05, 0.65, 1.0, 1.0, 1.0, 0.05, 0.05 };  // 绿色分量
 		const float B[7] = { 0.05, 0.05, 0.05, 0.05, 1.0, 1.0, 0.83 };  // 蓝色分量
@@ -434,13 +460,18 @@ void main() {
 		ConsoleOptions consoleOptions;
 		ConsoleOptions* consoleOptionsDevice;
 		CUDA_CHECK(cudaMalloc(&consoleOptionsDevice, sizeof(consoleOptionsDevice)));
+
+		std::cout << "HitObject调试颜色：\n粉色(Miss)\n绿色(灯光)\n黄色(不透明物体)\n红色(程序化几何体)" << std::endl;
 		while (!glfwWindowShouldClose(window))
 		{
-			static int debug_mode_current_item = 1;
+			static int debug_mode_current_item = 0;
 			static int accumulate_frame_mode=2;
 			consoleOptions.debugMode =(ConsoleDebugMode)debug_mode_current_item;
 			consoleOptions.frameAccumulationOptions = (FrameAccumulationOptions)accumulate_frame_mode;
-
+			if (consoleOptions.debugMode != ConsoleDebugMode::NoDebug) {
+				consoleOptions.frameAccumulationOptions = FrameAccumulationOptions::ForceOff;
+				accumulate_frame_mode = 1;
+			}
 			
 			CUDA_CHECK(cudaMemcpyAsync(consoleOptionsDevice, &consoleOptions, sizeof(ConsoleOptions), cudaMemcpyHostToDevice, Stream));
 

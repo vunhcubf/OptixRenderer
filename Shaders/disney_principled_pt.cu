@@ -30,6 +30,25 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
     // 首先发射primary ray
     HitInfo hitInfo;
     TraceRay(hitInfo, RayOrigin, RayDirection, TMIN, 0, 1, 0);
+    
+    float3 DebugColor = ASSERT_VALID(make_float3(0));
+
+    if (CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::PrimaryRayHitObject) {
+        if (hitInfo.surfaceType == Miss) {
+            DebugColor = make_float3(1, 0, 1);
+        }
+        else if (hitInfo.surfaceType == Light) {
+            DebugColor = make_float3(0, 1, 0);
+        }
+        else if (hitInfo.surfaceType == Opaque) {
+            DebugColor = make_float3(1, 1, 0);
+        }
+        else if (hitInfo.surfaceType == ProceduralObject) {
+            DebugColor = make_float3(1, 0, 0);
+        }
+        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(DebugColor);
+        return;
+    }
 
     if (hitInfo.surfaceType == Miss) {
         RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection));
@@ -41,139 +60,160 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
         RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = LightColor;
         return;
     }
-
-    float3 DebugColor = ASSERT_VALID(make_float3(0));
-
+    
+    float3 radianceDirect = make_float3(0);
+    float3 radianceIndirect = make_float3(0);
     for (; RecursionDepth < RayTracingGlobalParams.MaxRecursionDepth; RecursionDepth++) {
         SurfaceData surfaceData;
         surfaceData.Clear();
         surfaceData.Load(hitInfo);
-
-        bool IsTransmission;
+        // 从一个表面开始
         // X表示Bxdf射线
-        // Y表示NEE 
-        float Pf_X;
+        // Y表示NEE
+        bool IsTransmissionBxdfRay;
+        // bxdf射线的bxdf概率
+        float Pf_X = 0;
+        float Pg_Y = 0;
+        float Pf_Y = 0;
+        float Pg_X = 0;
         float3 BsdfIndirect;
-        float4 Noise4 = ASSERT_VALID(hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth)));
-        float4 Noise14 = ASSERT_VALID(hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth + 0x11932287U)));
-        float4 Noise24 = ASSERT_VALID(hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth + 0x74308147U)));
+        float4 Noise4 = ASSERT_VALID(saturate(hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth))));
+        float4 Noise14 = ASSERT_VALID(saturate(hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth + 0x11932287U))));
+        float4 Noise24 = ASSERT_VALID(saturate(hash44(make_uint4(idx.x, idx.y, RayTracingGlobalParams.FrameNumber, RecursionDepth + 0x74308147U))));
         float3 V = ASSERT_VALID(normalize(-RayDirection));
-
+        // 生成bxdf射线
         {
             float3 HForward;
-            RayDirection = ASSERT_VALID(SampleBsdf(surfaceData, make_float3(Noise4.x, Noise4.y, Noise4.z), V, IsTransmission, HForward));
-            Pf_X = ASSERT_VALID(EvalPdf(surfaceData, V, RayDirection, IsTransmission, HForward));
-            BsdfIndirect = ASSERT_VALID(EvalBsdf(surfaceData, V, RayDirection, IsTransmission, HForward));
+            RayDirection = ASSERT_VALID(SampleBsdf(surfaceData, make_float3(Noise4.x, Noise4.y, Noise4.z), V, IsTransmissionBxdfRay, HForward));
+            Pf_X = ASSERT_VALID(EvalPdf(surfaceData, V, RayDirection, IsTransmissionBxdfRay, HForward));
+            BsdfIndirect = ASSERT_VALID(EvalBsdf(surfaceData, V, RayDirection, IsTransmissionBxdfRay, HForward));
         }
 
         TraceRay(hitInfo, surfaceData.Position, RayDirection, TMIN, 0, 1, 0);
+        
+        if ((RecursionDepth==0 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FirstBsdfRayHitObject) ||
+            (RecursionDepth == 1 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::SecondBsdfRayHitObject) ||
+            (RecursionDepth == 2 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::ThirdBsdfRayHitObject)) {
+            if (hitInfo.surfaceType == Miss) {
+                DebugColor = make_float3(1, 0, 1);
+            }
+            else if (hitInfo.surfaceType == Light) {
+                DebugColor = make_float3(0, 1, 0);
+            }
+            else if (hitInfo.surfaceType == Opaque) {
+                DebugColor = make_float3(1, 1, 0);
+            }
+            else if (hitInfo.surfaceType == ProceduralObject) {
+                DebugColor = make_float3(1, 0, 0);
+            }
+            RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(DebugColor);
+            return;
+        }
 
-        float3 IrradianceDirect = ASSERT_VALID(make_float3(0));
-        float3 IrradianceIndirect = ASSERT_VALID(make_float3(0));
-        float3 WeightNew = ASSERT_VALID(make_float3(0));
+        
+        float3 WeightNew = make_float3(0);
         bool terminateRay = false;
-        bool DomeLight = RayTracingGlobalParams.DomeLightBuffer != nullptr;
+        bool HasDomeLight = RayTracingGlobalParams.DomeLightBuffer != nullptr;
 
         // 若光线出现在错误的表面则terminateRay
-        if (IsTransmission) {
-            bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
-            if (InSurface) {
-                terminateRay = dot(RayDirection, surfaceData.Normal) >= 0.0f;
-            }
-            else {
-                terminateRay = dot(RayDirection, surfaceData.Normal) < 0.0f;
-            }
+        if (IsTransmissionBxdfRay) {
+            terminateRay = !IsRayContributeToBtdf(RayDirection, surfaceData.VertexNormal, V);
         }
         else {
-            bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
-            if (InSurface) {
-                terminateRay = dot(RayDirection, surfaceData.Normal) < 0.0f;
-            }
-            else {
-                terminateRay = dot(RayDirection, surfaceData.Normal) >= 0.0f;
-            }
+            terminateRay = IsRayContributeToBtdf(RayDirection, surfaceData.VertexNormal, V);
         }
+        // 生成nee射线
         bool IsSampleDomeLight = false;
-        if (!IsTransmission) { // && RayTracingGlobalParams.consoleOptions->debugMode == ConsoleDebugMode::MIS
-            uint LightToSample = (uint)floor(frac(Noise14.z) * RayTracingGlobalParams.LightListLength + (DomeLight ? 1 : 0));
-            LightToSample = min(RayTracingGlobalParams.LightListLength - 1 + (DomeLight ? 1 : 0), LightToSample);
-            float3 LiDirect, BrdfDirect;
+        {
+            // 采样灯光,对场景里所有的光源积分
+            uint LightToSample = (uint)floor(frac(Noise14.z) * RayTracingGlobalParams.LightListLength + (HasDomeLight ? 1 : 0));
+            LightToSample = min(RayTracingGlobalParams.LightListLength - 1 + (HasDomeLight ? 1 : 0), LightToSample);
+            float3 LiDirect, BsdfDirect;
             float3 RayDirDirectLight;
             if (LightToSample < RayTracingGlobalParams.LightListLength) {
                 float4 SampleResult = ASSERT_VALID(SampleLight(LightToSample, Noise14.x, Noise14.y, surfaceData.Position));
                 float3 SamplePoint = ASSERT_VALID(make_float3(SampleResult.x, SampleResult.y, SampleResult.z));
-                RayDirDirectLight = ASSERT_VALID(normalize(SamplePoint - surfaceData.Position));
+                RayDirDirectLight = ASSERT_VALID(saturateRay(normalize(SamplePoint - surfaceData.Position)));
             }
             else {
-                 RayDirDirectLight = SampleDomeLight(Noise24);
+                 RayDirDirectLight = ASSERT_VALID(SampleDomeLight(Noise24,make_float2(Noise14.w, Noise4.w)));
                  IsSampleDomeLight = true;
             }
-
+            
             HitInfo hitInfoDirectLight;
             TraceRay(hitInfoDirectLight, surfaceData.Position, RayDirDirectLight, TMIN, 0, 1, 0);
 
+            if ((RecursionDepth == 0 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FirstNEERayHitObject) ||
+                (RecursionDepth == 1 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::SecondNEERayHitObject) ||
+                (RecursionDepth == 2 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::ThirdNEERayHitObject)) {
+                if (hitInfoDirectLight.surfaceType == Miss) {
+                    DebugColor = make_float3(1, 0, 1);
+                }
+                else if (hitInfoDirectLight.surfaceType == Light) {
+                    DebugColor = make_float3(0, 1, 0);
+                }
+                else if (hitInfoDirectLight.surfaceType == Opaque) {
+                    DebugColor = make_float3(1, 1, 0);
+                }
+                else if (hitInfoDirectLight.surfaceType == ProceduralObject) {
+                    DebugColor = make_float3(1, 0, 0);
+                }
+                RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(DebugColor);
+                return;
+            }
+            // 光源的辐射
             LiDirect = hitInfoDirectLight.surfaceType == SurfaceType::Light
                 ? ASSERT_VALID(GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfoDirectLight.SbtDataPtr))))
                 : ASSERT_VALID(make_float3(0.0f));
             LiDirect += hitInfoDirectLight.surfaceType == SurfaceType::Miss
                 ? ASSERT_VALID(GetSkyBoxColor(hitInfoDirectLight.SbtDataPtr, RayDirDirectLight))
                 : ASSERT_VALID(make_float3(0.0f));
-
-            BrdfDirect = ASSERT_VALID(EvalBsdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight)));
-
-            float Pf_Y = ASSERT_VALID(EvalPdf(surfaceData, V, RayDirDirectLight, false, normalize(V + RayDirDirectLight)));
-            float WeightSum = Pf_Y;
-
+            // 判断光源射线是对brdf做贡献，还是对btdf做贡献
+            bool NEERayContributeToBtdf = IsRayContributeToBtdf(RayDirection, surfaceData.VertexNormal, V);
+            BsdfDirect = ASSERT_VALID(EvalBsdf(surfaceData, V, RayDirDirectLight, NEERayContributeToBtdf, normalize(V + RayDirDirectLight)));
+            // 光源射线在bxdf的概率
+            Pf_Y = ASSERT_VALID(EvalPdf(surfaceData, V, RayDirDirectLight, NEERayContributeToBtdf, normalize(V + RayDirDirectLight)));
+            // 累计光源射线在灯光采样的概率
             for (uint light = 0; light < RayTracingGlobalParams.LightListLength; light++) {
-                float Pg_Y = ASSERT_VALID(PdfLight(light, surfaceData.Position, RayDirDirectLight) / (RayTracingGlobalParams.LightListLength + (DomeLight ? 1 : 0)));
-                WeightSum += Pg_Y;
+                Pg_Y += ASSERT_VALID(PdfLight(light, surfaceData.Position, RayDirDirectLight) / (RayTracingGlobalParams.LightListLength + (HasDomeLight ? 1 : 0)));
             }
-            WeightSum += DomeLight ? ASSERT_VALID(GetDomeLightProb(RayDirDirectLight) / (RayTracingGlobalParams.LightListLength + (DomeLight ? 1 : 0))) : 0;
-            IrradianceDirect += ASSERT_VALID(BrdfDirect * LiDirect / WeightSum);
+            Pg_Y += HasDomeLight ? ASSERT_VALID(GetDomeLightProb(RayDirDirectLight) / (RayTracingGlobalParams.LightListLength + (HasDomeLight ? 1 : 0))) : 0;
+            radianceDirect = (BsdfDirect * LiDirect / (Pg_Y+ Pf_Y)); // 这一项对应着 Li*Bsdf/(PfY+PgY)
 
-            WeightSum = Pf_X;
+            // 累计bxdf射线在灯光采样中的概率Pgx
             for (uint light = 0; light < RayTracingGlobalParams.LightListLength; light++) {
-                float Pg_X = ASSERT_VALID(PdfLight(light, surfaceData.Position, RayDirection)) / (RayTracingGlobalParams.LightListLength + (DomeLight ? 1 : 0));
-                WeightSum += Pg_X;
+                Pg_X += ASSERT_VALID(PdfLight(light, surfaceData.Position, RayDirection)) / (RayTracingGlobalParams.LightListLength + (HasDomeLight ? 1 : 0));
             }
-            WeightSum += DomeLight ? ASSERT_VALID(GetDomeLightProb(RayDirection) / (RayTracingGlobalParams.LightListLength + (DomeLight ? 1 : 0))) : 0;
+            Pg_X += HasDomeLight ? ASSERT_VALID(GetDomeLightProb(RayDirection) / (RayTracingGlobalParams.LightListLength + (HasDomeLight ? 1 : 0))) : 0;
 
+            // 现在考虑bxdf射线命中了哪里
+            // 若命中光源，统计辐射并结束，若命中物体，累计bxdf射线的bsdf值
+            bool BxdfRayHitLightSrc = false;
+            float3 LiBxdf=make_float3(0.0f);
             if (hitInfo.surfaceType == SurfaceType::Miss) {
-                IrradianceIndirect = ASSERT_VALID(GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection));
-                IrradianceIndirect *= ASSERT_VALID(BsdfIndirect / WeightSum);
+                LiBxdf += ASSERT_VALID(GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection));
                 terminateRay = true;
+                BxdfRayHitLightSrc = true;
             }
             else if (hitInfo.surfaceType == SurfaceType::Light) {
-                float3 LightColor = ASSERT_VALID(GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr))));
-                IrradianceIndirect = ASSERT_VALID(LightColor * BsdfIndirect / WeightSum);
+                LiBxdf += ASSERT_VALID(GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr))));
                 terminateRay = true;
-            }
-            else {
-                WeightNew = ASSERT_VALID(Weight * BsdfIndirect / WeightSum);
+                BxdfRayHitLightSrc = true;
             }
 
-            Radiance += ASSERT_VALID(Weight * IrradianceDirect);
-            if (terminateRay) {
-                Radiance += ASSERT_VALID(Weight * IrradianceIndirect);
-            }
-        }
-        else {
-            if (hitInfo.surfaceType == SurfaceType::Miss) {
-                IrradianceIndirect = ASSERT_VALID(GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection));
-                IrradianceIndirect *= ASSERT_VALID(BsdfIndirect / Pf_X);
-                terminateRay = true;
-            }
-            else if (hitInfo.surfaceType == SurfaceType::Light) {
-                IrradianceIndirect = ASSERT_VALID(GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr))));
-                IrradianceIndirect *= ASSERT_VALID(BsdfIndirect / Pf_X);
-                terminateRay = true;
+            if (BxdfRayHitLightSrc) {
+                radianceIndirect = LiBxdf * BsdfIndirect / (Pf_X + Pg_X);
             }
             else {
-                WeightNew = ASSERT_VALID(Weight * BsdfIndirect / Pf_X);
+                ASSERT_VALID(Pf_X);
+                ASSERT_VALID(Weight);
+                ASSERT_VALID(BsdfIndirect);
+                WeightNew = ASSERT_VALID(Weight * BsdfIndirect / (Pf_X + 1e-7f));
             }
 
+            Radiance += ASSERT_VALID(Weight * radianceDirect);
             if (terminateRay) {
-                Radiance += ASSERT_VALID(Weight * IrradianceIndirect);
+                Radiance += ASSERT_VALID(Weight * radianceIndirect);
             }
         }
 
@@ -182,8 +222,45 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
             break;
         }
     }
-
-    RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(Radiance);
+    if (CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FinalBsdfRayHitObject) {
+        if (hitInfo.surfaceType == Miss) {
+            DebugColor = make_float3(1, 0, 1);
+        }
+        else if (hitInfo.surfaceType == Light) {
+            DebugColor = make_float3(0, 1, 0);
+        }
+        else if (hitInfo.surfaceType == Opaque) {
+            DebugColor = make_float3(1, 1, 0);
+        }
+        else if (hitInfo.surfaceType == ProceduralObject) {
+            DebugColor = make_float3(1, 0, 0);
+        }
+        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(DebugColor);
+        return;
+    }
+    if (CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FinalRadianceDirect) {
+        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(radianceDirect);
+        return;
+    }
+    if (CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FinalRadianceIndirect) {
+        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(radianceIndirect);
+        return;
+    }
+    if (CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FinalWeight) {
+        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(Weight);
+        return;
+    }
+    if (CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FinalWeightClip) {
+        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(ValueClip(Weight));
+        return;
+    }
+    if (CONSOLE_OPTIONS->debugMode != ConsoleDebugMode::NoDebug) {
+        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(DebugColor);
+    }
+    else {
+        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(Radiance);
+    }
+    
     return;
 }
 

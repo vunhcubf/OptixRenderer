@@ -214,8 +214,8 @@ void ShowImage(
     int height,
     bool isDevice,
     const char* windowName = "",
-    bool normalize = true,
-    bool colormap = true,
+    bool normalize = false,
+    bool colormap = false,
     bool logTransform = false,
     bool enableUpscale = true)
 {

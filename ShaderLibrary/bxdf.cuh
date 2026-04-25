@@ -1,5 +1,62 @@
 #pragma once
 #include "common.cuh"
+static DEVICE float3 ImportanceSampleCosWeight(float2 rand) {
+	float r = sqrt(rand.x);
+	float phi = rand.y * 2.0f * PI;
+	float cos_phi = cos(phi);
+	float sin_phi = sin(phi);
+	float3 RayDir = make_float3(r * cos(phi), r * sin(phi), sqrt(fmaxf(0.0f, 1 - r * r)));
+	return ASSERT_VALID(RayDir);
+}
+
+static DEVICE float3 ImportanceSampleCosWeight(float2 rand, float3 N) {
+	float3 RayDir = ImportanceSampleCosWeight(rand);
+	float3 T, B;
+	GetTBNFromN(N, T, B);
+	RayDir = normalize(T * RayDir.x + B * RayDir.y + N * RayDir.z);
+	return ASSERT_VALID(RayDir);
+}
+
+static DEVICE float3 ImportanceSampleGGX(float2 Xi, float roughness)
+{
+	//if (roughness < 5e-2f) {
+	//	return make_float3(0, 0, 1);
+	//}
+	//Xi.y = fminf(Xi.y, 0.99f);
+	//float a = roughness * roughness;
+	//float phi = 2.0 * PI * Xi.x;
+	//float numerator = (1.0 - Xi.y);
+	//float denominator = (1.0 + (a * a - 1.0) * Xi.y);
+	//float cosTheta = sqrt(numerator / denominator);
+	//ASSERT_VALID(cosTheta);
+	//float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+	//ASSERT_VALID(sinTheta);
+	//// from spherical coordinates to cartesian coordinates
+	//float3 H;
+	//H.x = cos(phi) * sinTheta;
+	//H.y = sin(phi) * sinTheta;
+	//H.z = cosTheta;
+	//return ASSERT_VALID(H);
+
+	float a = roughness * roughness;
+	if (roughness < 1e-4f) return make_float3(0, 0, 1);
+	float3 ray = ImportanceSampleCosWeight(Xi);
+	ray = ray * make_float3(a, a, 1);
+	float len2 = dot(ray, ray);
+	if (len2 < 1e-8) return make_float3(0, 0, 1);
+	return ray / sqrt(len2);
+
+}
+
+static DEVICE float3 ImportanceSampleGGX(float2 noise, float roughness, float3 N) {
+	float3 H = ImportanceSampleGGX(noise, roughness);
+	float3 T, B;
+	GetTBNFromN(N, T, B);
+	H = normalize(T * H.x + B * H.y + N * H.z);
+	return ASSERT_VALID(H);
+}
+ 
+ 
 static INLINE DEVICE float3 fresnelSchlick(float cosTheta, float3 F0)
 {
 	return F0 + (1.0 - F0) * Pow5(saturate(1.0 - cosTheta));
@@ -35,6 +92,9 @@ static INLINE DEVICE float Y(float3 color) {
 static INLINE DEVICE float DistributionGGX(float NdotH, float roughness)
 {
 	float a = roughness* roughness;
+	if (NdotH < 0.0f) {
+		return 0.0f;
+	}
 	if (NdotH < 0.01f) {
 		float deltaX = 1 - NdotH;
 		float deltaR = a;
@@ -52,9 +112,7 @@ static INLINE DEVICE float DistributionGGX(float NdotH, float roughness)
 	float a2 = a * a;
 	a2 = fmaxf(a2, FloatEpsilon);
 	float NdotH2 = NdotH * NdotH;
-	if (NdotH < 0.0f) {
-		return 0.0f;
-	}
+	
 	float num = a2;
 	float denom = (NdotH2 * (a2 - 1.0) + 1.0);
 	denom = PI * denom * denom;
@@ -123,7 +181,7 @@ static DEVICE float3 TransmissionBtdf(SurfaceData& surfaceData,
 }
 
 DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& IsTransmission,float3& H) {
-	bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
+	bool InSurface = dot(surfaceData.VertexNormal, V) >= 0.0f;
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
 	// 与射线方向同向的法线
@@ -141,7 +199,7 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 		float3 L = ASSERT_VALID(refract(-V, HForward, EtaI / EtaO, nullptr));
 		IsTransmission = true;
 		H = ASSERT_VALID(HForward);
-		return ASSERT_VALID(L);
+		return ASSERT_VALID(saturateRay(normalize(L)));
 	}
 	else {
 		float3 L;
@@ -154,15 +212,15 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 			L = ASSERT_VALID(ImportanceSampleCosWeight(make_float2(noise.x, noise.y), NForward));
 			H = ASSERT_VALID(normalize(V + L));
 		}
-		L = ASSERT_VALID(ClampRayDir(L, NForward));
-		return ASSERT_VALID(L);
+		L = ASSERT_VALID(ClampRayDir(L, InSurface ? surfaceData.VertexNormal : -surfaceData.VertexNormal));
+		return ASSERT_VALID(saturateRay(normalize(L)));
 	}
 }
 DEVICE float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmission,float3 HForward) {
-	bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
+	bool InSurface = dot(surfaceData.VertexNormal, V) >= 0.0f;
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
-	// 与射线方向同向的法线
+	// 与射线方向同向的法线surfaceData.Normal
 	float3 NForward = InSurface ? surfaceData.Normal : -surfaceData.Normal;
 
 	
@@ -189,18 +247,18 @@ DEVICE float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmi
 }
 
 DEVICE float3 EvalBsdf(SurfaceData& surfaceData, float3 V, float3 L, bool IsTransmission, float3 HForward) {
-	bool InSurface = dot(surfaceData.Normal, V) >= 0.0f;
+	bool InSurface = dot(surfaceData.VertexNormal, V) >= 0.0f;
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
-	// 与射线方向同向的法线
+	// 与V方向同向的法线
 	float3 NForward = InSurface ? surfaceData.Normal : -surfaceData.Normal;
-	float QReflect = 1;
-	float QDiffuse = (1 - surfaceData.Metallic) * (1 - surfaceData.Transmission);
-	float QTransmission = (1 - surfaceData.Metallic) * surfaceData.Transmission * (1 - DielectricFresnel(HForward, V, EtaI, EtaO));
-	float QSum = QReflect + QDiffuse + QTransmission;
-	QReflect /= QSum;
-	QTransmission /= QSum;
-	QDiffuse /= QSum;
+	//float QReflect = 1;
+	//float QDiffuse = (1 - surfaceData.Metallic) * (1 - surfaceData.Transmission);
+	//float QTransmission = (1 - surfaceData.Metallic) * surfaceData.Transmission * (1 - DielectricFresnel(HForward, V, EtaI, EtaO));
+	//float QSum = QReflect + QDiffuse + QTransmission;
+	//QReflect /= QSum;
+	//QTransmission /= QSum;
+	//QDiffuse /= QSum;
 
 	float PdfM = DistributionGGX(HForward, NForward, surfaceData.Roughness) * abs(dot(HForward, NForward));
 	if (IsTransmission) {
@@ -218,4 +276,16 @@ DEVICE float3 PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData,float3
 	float3 Bsdf = EvalBsdf(surfaceData, V, L, IsTransmission, HForward);
 	BxdfWeight = Bsdf / pdf;
 	return L;
+}
+
+DEVICE INLINE bool IsRayContributeToBtdf(float3 RayDir,float3 VertexNormal,float3 V) {
+	bool InSurface = dot(VertexNormal, V) >= 0.0f;
+	// 与V方向同向的法线
+	float3 NForward = InSurface ? VertexNormal : -VertexNormal;
+	if (dot(NForward, RayDir) >= 0) {
+		return false;
+	}
+	else {
+		return true;
+	}
 }

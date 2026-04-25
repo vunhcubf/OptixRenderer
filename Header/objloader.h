@@ -132,7 +132,7 @@ inline unordered_map<string, Material> LoadMtl(string path) {
 	if (ifs.is_open()) {
 		string line;
 		bool FirstTime = true;
-		Material Temp;
+		Material Temp = {};
 		while (std::getline(ifs, line)) {
 			vector<string> tokens = Split(line, ' ');
 			if (tokens.size() == 0) {

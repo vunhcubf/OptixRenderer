@@ -29,7 +29,7 @@ DEVICE INLINE float3 GetColorFromAnyLight(float* dataPtr) {
     Color.x = dataPtr[2];
     Color.y = dataPtr[3];
     Color.z = dataPtr[4];
-    return Color;
+    return LinearSRGB2ACES(Color);
 }
 DEVICE INLINE float3 GetColorFromAnyLight(uint lightIndex) {
     return GetColorFromAnyLight(FetchLightData(lightIndex));
@@ -223,8 +223,43 @@ DEVICE float PdfLight(uint lightIndex, float3 shadingPoint, float3 rayDir) {
     }
 }
 
+DEVICE float GetDomeLightProb(float3 RayDir) {
+    DomeLightISStruct* domeLightBuffer =
+        (DomeLightISStruct*)RayTracingGlobalParams.DomeLightBuffer;
+    DomeLightISStruct dome = domeLightBuffer[0];
+
+    float2 uv = GetSkyBoxUv(RayDir);
+
+    int col = floor(uv.x * dome.width);
+    int row = floor(uv.y * dome.height);
+    if (col >= dome.width)  col = dome.width - 1;
+    if (col < 0)            col = 0;
+    if (row >= dome.height) row = dome.height - 1;
+    if (row < 0)            row = 0;
+
+    float pRow = ASSERT_VALID(dome.pdfMarginal[row]);
+    float pColGivenRow = ASSERT_VALID(dome.pdfRow[row * dome.width + col]);
+    float pTexel = ASSERT_VALID(pRow * pColGivenRow);
+
+    float vCenter = ((float)row + 0.5f) / (float)dome.height;
+    float theta = PI * (1.0f - vCenter);
+
+    float sinTheta = sinf(theta);
+    if (sinTheta <= 1e-8f)
+        return 0.0f;
+
+    float deltaTheta = PI / (float)dome.height;
+    float deltaPhi = 2.0f * PI / (float)dome.width;
+    float solidAngle = ASSERT_VALID(sinTheta * deltaTheta * deltaPhi);
+    if (!(solidAngle > 0.0f))
+        return 0.0f;
+    // 6. 返回对立体角 pdf
+    return ASSERT_VALID(pTexel / solidAngle);
+}
+
+
 // 关于dome light的代码
-DEVICE float3 SampleDomeLight(float4 rnd) {
+DEVICE float3 SampleDomeLight(float4 rnd,float2 rnd2) {
     DomeLightISStruct* domeLightBuffer = (DomeLightISStruct*)RayTracingGlobalParams.DomeLightBuffer;
     DomeLightISStruct dome = domeLightBuffer[0];
     // ---------- sample row ----------
@@ -233,10 +268,12 @@ DEVICE float3 SampleDomeLight(float4 rnd) {
     if (rowIdx < 0) rowIdx = 0;
 
     int row;
-    if (rnd.y < dome.colQ[rowIdx])
+    if (rnd.y < dome.colQ[rowIdx]) {
         row = rowIdx;
-    else
+    }
+    else {
         row = dome.colAlias[rowIdx];
+    }
     // ---------- sample col ----------
     int colIdx = (int)(rnd.z * dome.width);
     if (colIdx >= dome.width) colIdx = dome.width - 1;
@@ -250,45 +287,9 @@ DEVICE float3 SampleDomeLight(float4 rnd) {
     else
         col = dome.rowAlias[offset];
     // ---------- texel center -> uv ----------
-    float u = ((float)col + 0.5f) / (float)dome.width;
-    float v = ((float)row + 0.5f) / (float)dome.height;
+    float u = ((float)col + rnd2.x) / (float)dome.width;
+    float v = ((float)row + rnd2.y) / (float)dome.height;
 
     float3 rayDir= GetRayDirFromSkyBoxUv(make_float2(u,v));
     return rayDir;
-}
-DEVICE float GetDomeLightProb(float3 RayDir) {
-    DomeLightISStruct* domeLightBuffer =
-        (DomeLightISStruct*)RayTracingGlobalParams.DomeLightBuffer;
-    DomeLightISStruct dome = domeLightBuffer[0];
-
-    float2 uv = GetSkyBoxUv(RayDir);
-    int col = (int)(uv.x * dome.width);
-    int row = (int)(uv.y * dome.height);
-    if (col >= dome.width)  col = dome.width - 1;
-    if (col < 0)            col = 0;
-    if (row >= dome.height) row = dome.height - 1;
-    if (row < 0)            row = 0;
-
-    float pRow = dome.pdfMarginal[row];
-    float pColGivenRow = dome.pdfRow[row * dome.width + col];
-    float pTexel = pRow * pColGivenRow;
-    if (pTexel <= 0.0f)
-        return 0.0f;
-
-    float vCenter = ((float)row + 0.5f) / (float)dome.height;
-    float theta = PI * (1.0f - vCenter);
-
-    float sinTheta = sinf(theta);
-    if (sinTheta <= 1e-8f)
-        return 0.0f;
-
-    float deltaTheta = PI / (float)dome.height;
-    float deltaPhi = 2.0f * PI / (float)dome.width;
-    float solidAngle = sinTheta * deltaTheta * deltaPhi;
-
-    if (!(solidAngle > 0.0f))
-        return 0.0f;
-
-    // 6. 返回对立体角 pdf
-    return pTexel / solidAngle;
 }

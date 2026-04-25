@@ -15,6 +15,15 @@
 #define TEXTURE_FORMAT_FLOAT3 6
 #define TEXTURE_FORMAT_FLOAT4 7
 
+inline float linear_to_srgb(float c)
+{
+	//return c;
+	if (c <= 0.0031308f)
+		return 12.92f * c;
+	else
+		return 1.055f * powf(c, 1.0f / 2.4f) - 0.055f;
+}
+
 inline float RemoveInf(float x) {
 	if (isinf(x)) {
 		return 1E10;
@@ -39,10 +48,10 @@ static inline float4* ReadOpenExr(const char* path, uint& width, uint& height) {
 	float4* img = (float4*)malloc(sizeof(float4) * w * h);
 	for (uint iw = 0; iw < w; iw++) {
 		for (uint ih = 0; ih < h; ih++) {
-			img[ih + iw * h].x = RemoveInf(pixels[w - 1 - iw][ih].r);
-			img[ih + iw * h].y = RemoveInf(pixels[w - 1 - iw][ih].g);
-			img[ih + iw * h].z = RemoveInf(pixels[w - 1 - iw][ih].b);
-			img[ih + iw * h].w = RemoveInf(pixels[w - 1 - iw][ih].a);
+			img[ih + iw * h].x = linear_to_srgb(RemoveInf(pixels[w - 1 - iw][ih].r));
+			img[ih + iw * h].y = linear_to_srgb(RemoveInf(pixels[w - 1 - iw][ih].g));
+			img[ih + iw * h].z = linear_to_srgb(RemoveInf(pixels[w - 1 - iw][ih].b));
+			img[ih + iw * h].w = linear_to_srgb(RemoveInf(pixels[w - 1 - iw][ih].a));
 		}
 	}
 	return img;
@@ -236,6 +245,18 @@ public:
 		texDesc.filterMode = textureFormat<=3? cudaFilterModePoint :cudaFilterModeLinear;
 		texDesc.readMode = cudaReadModeElementType;
 		texDesc.normalizedCoords = true;
+		if (textureFormat == TEXTURE_FORMAT_UCHAR1 ||
+			textureFormat == TEXTURE_FORMAT_UCHAR2 ||
+			textureFormat == TEXTURE_FORMAT_UCHAR3 ||
+			textureFormat == TEXTURE_FORMAT_UCHAR4) {
+			texDesc.sRGB = true;
+		}
+		else if (textureFormat == TEXTURE_FORMAT_FLOAT1 ||
+				textureFormat == TEXTURE_FORMAT_FLOAT2 ||
+				textureFormat == TEXTURE_FORMAT_FLOAT3 ||
+				textureFormat == TEXTURE_FORMAT_FLOAT4) {
+			texDesc.sRGB = false;
+		}
 
 		memset(&resDesc, 0, sizeof(cudaResourceDesc));
 		resDesc.resType = cudaResourceTypeArray;

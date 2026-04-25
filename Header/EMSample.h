@@ -138,7 +138,7 @@ inline AliasTable BuildAliasTable1D(const float* weights, int n)
 }
 
 inline EnvAliasTables BuildEnvAliasTablesFromLuminance(
-    const float* luminance,
+    std::vector<float>& luminance,
     int width,
     int height)
 {
@@ -154,6 +154,17 @@ inline EnvAliasTables BuildEnvAliasTablesFromLuminance(
 
     std::vector<float> rowSums(height, 0.0f);
     std::vector<float> rowWeights(width, 0.0f);
+
+    // luminace有的地方为0，将军说了，所有的像素都有可能被采样到。
+    // 先统计最大值
+    //for (int i = 0; i < width * height; i++) {
+    //    luminance[i] = std::pow(luminance[i],2);
+    //}
+    
+
+    //for (int i = 0; i < width * height; i++) {
+    //    luminance[i] += 0.001 * maxValue;
+    //}
 
     for (int r = 0; r < height; ++r)
     {
@@ -179,7 +190,12 @@ inline EnvAliasTables BuildEnvAliasTablesFromLuminance(
         }
         // 拷贝行的pdf
         for (int c = 0; c < width; c++) {
-            tables.pdfRow[r * width + c] = rowWeights[c] / rowSums[r];
+            if (rowSums[r] > 1e-7f) {
+                tables.pdfRow[r * width + c] = rowWeights[c] / rowSums[r];
+            }
+            else {
+                tables.pdfRow[r * width + c] = 1.0f / (float)width;
+            }
         }
     }
 
@@ -196,7 +212,12 @@ inline EnvAliasTables BuildEnvAliasTablesFromLuminance(
         MarginalSum += rowSums[r];
     }
     for (int r = 0; r < height; r++) {
-        tables.pdfMarginal[r] = rowSums[r]/ MarginalSum;
+        if (MarginalSum > 1e-7f) {
+            tables.pdfMarginal[r] = rowSums[r] / MarginalSum;
+        }
+        else {
+            tables.pdfMarginal[r] = 1.0f / (float)height;
+        }
     }
     return tables;
 }

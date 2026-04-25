@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <random>
 #include <type_traits>
+#include <algorithm>
 
 
 #define DEVICE __device__
@@ -165,9 +166,23 @@ enum class FrameAccumulationOptions :int {
 };
 extern const char* debugModeItems[];
 extern const char* frameAccumulationItems[];
+
 enum class ConsoleDebugMode :int {
     NoDebug = 0,
-    MIS = 1
+    PrimaryRayHitObject = 1,
+    FirstBsdfRayHitObject = 2,
+    SecondBsdfRayHitObject = 3,
+    ThirdBsdfRayHitObject = 4,
+
+    FirstNEERayHitObject = 5,
+    SecondNEERayHitObject = 6,
+    ThirdNEERayHitObject = 7,
+
+    FinalBsdfRayHitObject = 8,
+    FinalRadianceIndirect = 9,
+    FinalRadianceDirect = 10,
+    FinalWeight = 11,
+    FinalWeightClip = 12
 };
 struct ConsoleOptions {
     ConsoleDebugMode debugMode;
@@ -315,8 +330,8 @@ inline std::string getParentDir(std::string path) {
     std::filesystem::path filepath=path;
     return filepath.parent_path().string();
 }
-const uint default_width = 768;
 const uint default_height = 768;
+const uint default_width = 1366;
 
 float3 operator+(float3 a, float3 b);
 float3 operator-(float3 a, float3 b);

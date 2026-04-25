@@ -9,6 +9,10 @@
 #include <cuda/helpers.h>
 #include "optix_device.h"
 
+//#define ENABLE_ASSERT
+#define ACESWorkFlow
+#define COLOR_IN_MTL_IS_LINEARSRGB
+
 /// @brief ///////////////////
 #define TEXTURE_FORMAT_UCHAR1 0
 #define TEXTURE_FORMAT_UCHAR2 1
@@ -29,6 +33,8 @@
 #define DEVICE __device__
 #define HOST __host__
 #define INLINE __forceinline__
+
+#define ROUGHNESS_CLIP_THRESHOLD 0.05f
 
 typedef unsigned int uint;
 typedef unsigned long long uint64;
@@ -123,7 +129,20 @@ enum class FrameAccumulationOptions :int {
 };
 enum class ConsoleDebugMode :int {
 	NoDebug = 0,
-	MIS = 1
+	PrimaryRayHitObject = 1,
+	FirstBsdfRayHitObject = 2,
+	SecondBsdfRayHitObject = 3,
+	ThirdBsdfRayHitObject = 4,
+
+	FirstNEERayHitObject = 5,
+	SecondNEERayHitObject = 6,
+	ThirdNEERayHitObject = 7,
+
+	FinalBsdfRayHitObject = 8,
+	FinalRadianceIndirect = 9,
+	FinalRadianceDirect = 10,
+	FinalWeight = 11,
+	FinalWeightClip = 12
 };
 struct ConsoleOptions {
 	ConsoleDebugMode debugMode;
@@ -193,6 +212,64 @@ struct ModelData {
 #define BXDF_RAY_TYPE_TRANS 4U
 extern "C" __constant__ LaunchParameters RayTracingGlobalParams;
 
+DEVICE float3 linear_srgb_to_acescg(float3 c)
+{
+	return make_float3(
+		0.61313242f * c.x + 0.33953802f * c.y + 0.04741670f * c.z,
+		0.07012438f * c.x + 0.91639401f * c.y + 0.01345152f * c.z,
+		0.02058766f * c.x + 0.10957457f * c.y + 0.86978540f * c.z
+	);
+}
+
+DEVICE float3 acescg_to_linear_srgb(float3 c)
+{
+	return make_float3(
+		1.70485868f * c.x + -0.62171602f * c.y + -0.08329937f * c.z,
+		-0.13007682f * c.x + 1.14073577f * c.y + -0.01055980f * c.z,
+		-0.02396407f * c.x + -0.12897551f * c.y + 1.15301402f * c.z
+	);
+}
+
+#ifdef ACESWorkFlow
+#define LinearSRGB2ACES(x) linear_srgb_to_acescg(x)
+#define ACES2LinearSRGB(x) acescg_to_linear_srgb(x)
+#else
+#define LinearSRGB2ACES(x) (x)
+#define ACES2LinearSRGB(x) (x)
+#endif
+
+DEVICE INLINE float3 pow(float3 a, float e) {
+	return make_float3(pow(a.x, e), pow(a.y, e), pow(a.z, e));
+}
+
+DEVICE float3 srgb_oetf(float3 L)
+{
+	float3 low = 12.92 * L;
+	float3 high = 1.055f * pow(L, 1.0 / 2.4) - 0.055;
+
+	return make_float3(
+		(L.x <= 0.0031308) ? low.x : high.x,
+		(L.y <= 0.0031308) ? low.y : high.y,
+		(L.z <= 0.0031308) ? low.z : high.z
+	);
+}
+
+DEVICE float3 srgb_eotf(float3 V)
+{
+	float3 low = V / 12.92;
+	float3 high = pow((V + 0.055) / 1.055, 2.4);
+
+	return make_float3(
+		(V.x <= 0.04045) ? low.x : high.x,
+		(V.y <= 0.04045) ? low.y : high.y,
+		(V.z <= 0.04045) ? low.z : high.z
+	);
+}
+
+#define SRGBEotf(x) srgb_eotf(x)
+#define SRGBOetf(x) srgb_oetf(x)
+#define EotfAndACES(x) LinearSRGB2ACES(SRGBEotf(x))
+#define OetfAndSRGB(x) LinearSRGB2ACES(SRGBEotf(x))
 
 DEVICE bool isnan(float3 a) {
 	return isnan(a.x) || isnan(a.y) || isnan(a.z);
@@ -221,7 +298,7 @@ DEVICE INLINE void Assert(bool x) {
 }
 
 #define TMAX 1e16f
-#define TMIN 1e-3f
+#define TMIN 1e-4f
 #define FLOAT_NAN GetNaN()
 
 INLINE DEVICE float AssertValid(float a, const char* file, int line) {
@@ -327,7 +404,7 @@ INLINE DEVICE float4 AssertValidAndReport(float4 a, float4 extra1, const char* n
 
 #define SAFETY_MARGIN(a)\
 	(a<0.5f? a-FloatEpsilon : a+FloatEpsilon)
-//#define ENABLE_ASSERT
+
 #ifdef ENABLE_ASSERT
 #define ASSERT_VALID_AND_REPORT1(a,name1,e1) AssertValidAndReport(a,e1,name1,__FILE__,__LINE__)
 #define ASSERT_VALID_AND_REPORT2(a,name1,e1,name2,e2) AssertValidAndReport(a,e1,name1,e2,name2,__FILE__,__LINE__)
@@ -492,6 +569,9 @@ static INLINE DEVICE float saturate(float a) {
 static INLINE DEVICE float3 saturate(float3 a) {
 	return make_float3(saturate(a.x), saturate(a.y), saturate(a.z));
 }
+static INLINE DEVICE float4 saturate(float4 a) {
+	return make_float4(saturate(a.x), saturate(a.y), saturate(a.z), saturate(a.w));
+}
 static INLINE DEVICE float Pow5(float a) {
 	return a * a * a * a * a;
 }
@@ -520,6 +600,11 @@ static DEVICE INLINE float RadicalInverse_VdC(uint bits)
 static DEVICE INLINE float2 Hammersley(uint i, uint N)
 {
 	return make_float2((float)i/(float)N, RadicalInverse_VdC(i));
+}
+
+static DEVICE INLINE float3 saturateRay(float3 ray)
+{
+	return make_float3(clamp(ray.x, -1.0f, 1.0f), clamp(ray.y, -1.0f, 1.0f), clamp(ray.z, -1.0f, 1.0f));
 }
 
 static DEVICE INLINE float3 FilterGlossy(float3 In,float Threshold) {
@@ -559,12 +644,19 @@ static HOST DEVICE INLINE uint lcg4(uint prev)
 	return prev;
 }
 
+static DEVICE INLINE bool AnyNan(float3 v) {
+	return isnan(v.x) || isnan(v.y) || isnan(v.z);
+}
 
+static DEVICE INLINE bool AnyNan(float2 v) {
+	return isnan(v.x) || isnan(v.y);
+}
 
 static INLINE DEVICE float2 GetSkyBoxUv(float3 RayDir) {
 	// 首先获取垂直方向
 	float2 uv;
-	uv.y = ASSERT_VALID(acos(ASSERT_VALID(RayDir.z)) / PI);
+	ASSERT_VALID(RayDir);
+	uv.y = ASSERT_VALID(acos(RayDir.z) / PI);
 	uv.y = ASSERT_VALID(1 - uv.y);
 	uv.x = atan2(RayDir.y, RayDir.x);
 	if (RayDir.y < 0) {
@@ -591,7 +683,7 @@ INLINE DEVICE float3 GetRayDirFromSkyBoxUv(float2 uv) {
 	RayDir.x = ASSERT_VALID(cos(theta) * sin_phi);
 	RayDir.y = ASSERT_VALID(sin(theta) * sin_phi);
 
-	return ASSERT_VALID(RayDir);
+	return ASSERT_VALID(saturateRay(normalize(RayDir)));
 }
 
 static DEVICE float Rand(uint& seed) {
@@ -612,75 +704,6 @@ static DEVICE float3 ClampRayDir(float3 RayDir, float3 NForward) {
 	return normalize(RayDir);
 }
 
-
-static DEVICE float3 ImportanceSampleCosWeight(float2 rand,float3 N) {
-	float p = rand.x;
-	float theta = rand.y * 2.0f * PI;
-	float sin_phi = sqrt(p);
-	float cos_phi = sqrt(1-p);
-	float3 T;
-	if (abs(N.x)<1e-3f) {
-		T = make_float3(0, N.z, -N.y);//x
-	}
-	else {
-		T = make_float3(N.z, 0, -N.x);//x
-	}
-	T = normalize(T);
-	float3 B = cross(N, T);//y
-	B = normalize(B);
-	float3 RayDir = T * sin_phi * cos(theta) + B * sin_phi * sin(theta) + N * fmaxf(cos_phi,FloatEpsilon);
-	RayDir = normalize(RayDir);
-	return ASSERT_VALID(RayDir);
-}
-static DEVICE float3 ImportanceSampleCosWeight(uint& Seed, float3 N) {
-	float phi = Rand(Seed);
-	float theta = Rand(Seed);
-	return ASSERT_VALID(ImportanceSampleCosWeight(make_float2(phi, theta), N));
-}
-static DEVICE float3 ImportanceSampleGGX(float2 Xi, float roughness)
-{
-	if (roughness < 5e-2f) {
-		return make_float3(0, 0, 1);
-	}
-	Xi.y = fminf(Xi.y, 0.99f);
-	float a = roughness * roughness;
-	float phi = 2.0 * PI * Xi.x;
-	float numerator = (1.0 - Xi.y);
-	float denominator = (1.0 + (a * a - 1.0) * Xi.y);
-	float cosTheta = sqrt(numerator / denominator);
-	ASSERT_VALID(cosTheta);
-	float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-	ASSERT_VALID(sinTheta);
-	// from spherical coordinates to cartesian coordinates
-	float3 H;
-	H.x = cos(phi) * sinTheta;
-	H.y = sin(phi) * sinTheta;
-	H.z = cosTheta;
-	return ASSERT_VALID(H);
-}
-static DEVICE float3 ImportanceSampleGGX(uint& Seed, float roughness)
-{
-	float2 Xi;
-	Xi.x = Rand(Seed);
-	Xi.y = Rand(Seed);
-	return ASSERT_VALID(ImportanceSampleGGX(Xi, roughness));
-}
-DEVICE float3 LocalToWorld(float3 H,float3 N) {
-	float3 T, B;
-	GetTBNFromN(N, T, B);
-	H = T * H.x + B * H.y + N * H.z;
-	return ASSERT_VALID(H);
-}
-static DEVICE float3 ImportanceSampleGGX(float2 noise, float roughness, float3 N) {
-	float3 H = ImportanceSampleGGX(noise, roughness);
-	float3 T, B;
-	{
-		GetTBNFromN(N, T, B);
-		H = T * H.x + B * H.y + N * H.z;
-		H = normalize(H);
-		return ASSERT_VALID(H);
-	}
-}
 
 static DEVICE float3 ClmapRayDir(const float3& n, float3 l) {
 	float3 T, B, L;
@@ -735,8 +758,9 @@ DEVICE INLINE uint FloatAsUint(float&& a) {
 	return __float_as_uint(a);
 }
 struct SurfaceData{
-	float3 Normal;
-	float3 GeometryNormal;
+	float3 Normal; // 应用了法线贴图的顶点法线
+	float3 FaceNormal; // 面法线
+	float3 VertexNormal; // 顶点法线
 	float3 Position;
 	float3 BaseColor;
 	float3 NormalMap;
@@ -751,7 +775,8 @@ struct SurfaceData{
 	SurfaceType HitType;
 	DEVICE void Clear(){
 		Normal=make_float3(0.0f);
-		GeometryNormal=make_float3(0.0f);
+		FaceNormal =make_float3(0.0f);
+		VertexNormal = make_float3(0.0f);
 		Position=make_float3(0.0f);
 		BaseColor=make_float3(0.0f);
 		NormalMap=make_float3(0.0f);
@@ -789,20 +814,24 @@ struct SurfaceData{
 		float3& Normal2 = NormalPtr[3*primIndex+1];
 		float3& Normal3 = NormalPtr[3*primIndex+2];
 		Normal= normalize(Normal1 * Centrics.x + Normal2 * Centrics.y + Normal3 * Centrics.z);
-	
+		VertexNormal = Normal;
 		// 计算几何法线
 		float3* VerticesPtr = (float3*)GeometryDataPtr->Vertices;
 		float3& v1 = VerticesPtr[3 * primIndex];
 		float3& v2 = VerticesPtr[3 * primIndex + 1];
 		float3& v3 = VerticesPtr[3 * primIndex + 2];
-		GeometryNormal = normalize(cross(v1 - v2, v1 - v3));
+		FaceNormal = normalize(cross(v1 - v2, v1 - v3));
 		Position=v1 * Centrics.x + v2 * Centrics.y + v3 * Centrics.z;
 		if (IsTextureViewValid(ModelDataptr->MaterialData->BaseColorMap)) {
 			float4 tmp = SampleTexture2DRuntimeSpecific(ModelDataptr->MaterialData->BaseColorMap, TexCoord.x, TexCoord.y);
-			BaseColor = make_float3(tmp.x, tmp.y, tmp.z)*ModelDataptr->MaterialData->BaseColor;
+			BaseColor = EotfAndACES(make_float3(tmp.x, tmp.y, tmp.z)*ModelDataptr->MaterialData->BaseColor);
 		}
 		else {
-			BaseColor = ModelDataptr->MaterialData->BaseColor;
+#ifndef COLOR_IN_MTL_IS_LINEARSRGB
+			BaseColor = EotfAndACES(ModelDataptr->MaterialData->BaseColor);
+#else
+			BaseColor = LinearSRGB2ACES(ModelDataptr->MaterialData->BaseColor);
+#endif
 		}
 		
 		if (IsTextureViewValid(ModelDataptr->MaterialData->ARMMap)) {
@@ -816,7 +845,6 @@ struct SurfaceData{
 			Metallic = ModelDataptr->MaterialData->Metallic;
 		}
 		BaseColor *= AO;
-		Roughness = fmaxf(Roughness, 1e-2f);// 更低的阈值不能通过熔炉测试
 		Transmission = ModelDataptr->MaterialData->Transmission;
 		ior = ModelDataptr->MaterialData->Ior;
 		ior = fmaxf(ior, 1.0001f);
@@ -841,17 +869,28 @@ DEVICE  INLINE T* GetSbtDataPointer(CUdeviceptr d) {
 	return (T*)d;
 }
 
+
 DEVICE float3 GetSkyBoxColor(CUdeviceptr dataptr, float3 RayDirection) {
 	MissData* data = (MissData*)dataptr;
 	float2 SkyBoxUv = ASSERT_VALID(GetSkyBoxUv(RayDirection));
 
 	if (IsTextureViewValid(data->SkyBox)) {
 		float4 skybox = ASSERT_VALID(SampleTexture2DRuntimeSpecific(data->SkyBox, SkyBoxUv.x, SkyBoxUv.y));
-		return ASSERT_VALID((make_float3(skybox.x, skybox.y, skybox.z)));
+		return ASSERT_VALID(LinearSRGB2ACES(make_float3(skybox.x, skybox.y, skybox.z)));
 	}
 	else {
-		return ASSERT_VALID(data->BackgroundColor * data->SkyBoxIntensity);
+		return ASSERT_VALID(LinearSRGB2ACES(data->BackgroundColor * data->SkyBoxIntensity));
 	}
 }
 
-
+DEVICE float3 ValueClip(float3 c) {
+	if (c.x > 1.0f || c.y > 1.0f || c.z > 1.0f) {
+		return make_float3(1, 0, 0);
+	} else if (c.x > 10.0f || c.y > 10.0f || c.z > 10.0f) {
+		return make_float3(1, 0, 1);
+	}
+	else if (c.x > 100.0f || c.y > 100.0f || c.z > 100.0f) {
+		return make_float3(0, 0, 1);
+	}
+	else return c;
+}

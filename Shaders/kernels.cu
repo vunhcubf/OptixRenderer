@@ -11,13 +11,13 @@ extern "C" GLOBAL void AccumulateFrame(uint PixelCount, uint64 FrameCounter, uch
 	float3 AccumulatedColor;
 	if (FrameCounter == 0 || options->frameAccumulationOptions==FrameAccumulationOptions::ForceOff) {
 		AccumulatedColor = IndirectOutputBuffer[Idx];
-		OutputSRGBBuffer[Idx] = make_color(ACESFilm(AccumulatedColor));
+		OutputSRGBBuffer[Idx] = make_color((ACES2LinearSRGB(ACESFilm(AccumulatedColor))));
 		AccumulateBuffer[Idx] = AccumulatedColor;
 	}
 	else {
 		AccumulatedColor = FrameCounter * AccumulateBuffer[Idx] + IndirectOutputBuffer[Idx];
 		AccumulateBuffer[Idx] = AccumulatedColor / (FrameCounter + 1);
-		OutputSRGBBuffer[Idx] = make_color(ACESFilm(AccumulatedColor / (FrameCounter + 1)));
+		OutputSRGBBuffer[Idx] = make_color((ACES2LinearSRGB(ACESFilm(AccumulatedColor / (FrameCounter + 1)))));
 	}
 	
 }
