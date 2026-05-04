@@ -56,6 +56,7 @@ public:
 		double2 MousePosPrev);
 	CameraData ExportCameraData(int width, int height);
 };
+
 //实现场景管理
 //一个物体包括一个网格体，一个底层加速结构， 一份模型和材质数据，若干sbt记录
 //渲染准备部分执行的逻辑有：
@@ -164,7 +165,7 @@ public:
 private:
 	UniquePtrDevice LaunchParameter;
 public:
-	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, CameraData cameraData, uint Width, uint Height, uint Spp);
+	//void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, CameraData cameraData, uint Width, uint Height, uint Spp);
 	void DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height);
 };
 #include <opencv2/opencv.hpp>

@@ -111,6 +111,7 @@ struct HitInfo { // 5 uint
 	uint PrimitiveID; // 1 uint
 	float2 TriangleCentroidCoord; // 2 uint
 	SurfaceType surfaceType;
+	float T;
 };
 struct RayGenData
 {
@@ -142,12 +143,23 @@ enum class ConsoleDebugMode :int {
 	FinalRadianceIndirect = 9,
 	FinalRadianceDirect = 10,
 	FinalWeight = 11,
-	FinalWeightClip = 12
+	FinalWeightClip = 12,
+
+	DebugLightPath = 13,
+	DebugGlobalLightPath = 14
 };
 struct ConsoleOptions {
 	ConsoleDebugMode debugMode;
 	FrameAccumulationOptions frameAccumulationOptions;
 };
+struct PixelIterationContext {
+	static const uint SizeofPixelContext = 11;
+	float3 BxdfRayDir;
+	float3 NeeRayDir;
+	float BxdfRayT;
+	float NeeRayT;
+	float3 ShadingPointPos;
+}; // 把一个像素一次跌倒的的数据全都扒下来
 struct LaunchParameters {
 	float3* IndirectOutputBuffer;
 	uchar4* ImagePtr;
@@ -163,6 +175,10 @@ struct LaunchParameters {
 	uint LightListLength;
 	ConsoleOptions* consoleOptions;
 	void* DomeLightBuffer;
+	void* DebugBuffer;
+	uint* DebugBufferPayloadLength;
+	float* DepthBuffer;
+
 };
 
 struct DomeLightISStruct {
@@ -298,7 +314,7 @@ DEVICE INLINE void Assert(bool x) {
 }
 
 #define TMAX 1e16f
-#define TMIN 1e-4f
+#define TMIN 1e-3f
 #define FLOAT_NAN GetNaN()
 
 INLINE DEVICE float AssertValid(float a, const char* file, int line) {
@@ -694,27 +710,27 @@ static DEVICE float Rand(uint& seed) {
 }
 
 static DEVICE float3 ClampRayDir(float3 RayDir, float3 NForward) {
-	NForward = normalize(NForward);
+	//NForward = normalize(NForward);
 	float projection = dot(RayDir, NForward);
 	if (projection < 0) {
 		float3 normalComponent = projection * NForward;
 		float3 tangentComponent = RayDir - normalComponent;
-		RayDir = normalize(tangentComponent + 0.9 * NForward);
+		RayDir = normalize(tangentComponent + 0.05 * NForward);
 	}
-	return normalize(RayDir);
+	return (RayDir);
 }
 
 
-static DEVICE float3 ClmapRayDir(const float3& n, float3 l) {
-	float3 T, B, L;
-	GetTBNFromN(n, T, B);
-	L = make_float3(dot(T, l), dot(B, l), dot(n, l));
-	L.z = fmaxf(L.z, 1e-2f);
-	L = normalize(L);
-	L = T * L.x + B * L.y + n * L.z;
-	L = normalize(L);
-	return ASSERT_VALID(L);
-}
+//static DEVICE float3 ClmapRayDir(const float3& n, float3 l) {
+//	float3 T, B, L;
+//	GetTBNFromN(n, T, B);
+//	L = make_float3(dot(T, l), dot(B, l), dot(n, l));
+//	L.z = fmaxf(L.z, 1e-2f);
+//	L = normalize(L);
+//	L = T * L.x + B * L.y + n * L.z;
+//	L = normalize(L);
+//	return ASSERT_VALID(L);
+//}
 static INLINE DEVICE float3 UseNormalMap(float3 N,float3 NormalMap,float Intensity) {
 	float3 T;
 	float3 BT;
@@ -884,13 +900,51 @@ DEVICE float3 GetSkyBoxColor(CUdeviceptr dataptr, float3 RayDirection) {
 }
 
 DEVICE float3 ValueClip(float3 c) {
-	if (c.x > 1.0f || c.y > 1.0f || c.z > 1.0f) {
+	const float th1 = 2.0;
+	const float th2 = 3.0;
+	const float th3 = 4.0;
+	if (c.x > th1 || c.y > th1 || c.z > th1) {
 		return make_float3(1, 0, 0);
-	} else if (c.x > 10.0f || c.y > 10.0f || c.z > 10.0f) {
+	} else if (c.x > th2 || c.y > th2 || c.z > th2) {
 		return make_float3(1, 0, 1);
 	}
-	else if (c.x > 100.0f || c.y > 100.0f || c.z > 100.0f) {
+	else if (c.x > th3 || c.y > th3 || c.z > th3) {
 		return make_float3(0, 0, 1);
 	}
 	else return c;
+}
+
+static INLINE DEVICE bool WorldToNDC_LH(
+	float3 worldPos,
+	float2& outNDC,
+	float& outViewZ
+)
+{
+	const float3 eye = RayTracingGlobalParams.cameraData.cam_eye;
+	const float3 U = RayTracingGlobalParams.cameraData.cam_u;
+	const float3 V = RayTracingGlobalParams.cameraData.cam_v;
+	const float3 W = RayTracingGlobalParams.cameraData.cam_w;
+
+	float3 p = worldPos - eye;
+
+	float3 uAxis = normalize(U);
+	float3 vAxis = normalize(V);
+	float3 wAxis = normalize(W);
+
+	float uScale = length(U);
+	float vScale = length(V);
+
+	float x = dot(p, uAxis);
+	float y = dot(p, vAxis);
+	float z = dot(p, wAxis); // 左手系：前方 z > 0
+
+	outViewZ = z;
+
+	if (z <= 1e-6f)
+		return false; // 在相机后面或太近
+
+	outNDC.x = x / (z * uScale);
+	outNDC.y = y / (z * vScale);
+
+	return true;
 }

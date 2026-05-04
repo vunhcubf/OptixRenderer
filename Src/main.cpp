@@ -10,6 +10,7 @@
 #include "Light.h"
 #include "EMSample.h"
 #include "EMSample.cuh"
+#include <glad/glad.h>
 
 #define GLFW_EXPOSE_NATIVE_WIN32
 #define GLFW_EXPOSE_NATIVE_WGL
@@ -19,6 +20,8 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+
+#define DEBUG_BUFF_SIZE sizeof(float3) * 128
 const char* debugModeItems[] = {
 	"NoDebug", 
 	"PrimaryRayHitObject",
@@ -34,12 +37,33 @@ const char* debugModeItems[] = {
 	"FinalRadianceIndirect",
 	"FinalRadianceDirect",
 	"FinalWeight",
-	"FinalWeightClip"
+	"FinalWeightClip",
+
+	"DebugLightPath",
+	"DebugGlobalLightPath"
 };
 const char* frameAccumulationItems[] = {
 	"ForceOn", "ForceOff", "Auto"
 };
+bool DepthTestWhenDebugLightPath = false;
+extern "C" 	void LaunchDrawWorldLineParallel(
+	uchar4 * framebuffer,
+	const float* depthBuffer,
+	int width,
+	int height,
 
+	float3 cam_eye,
+	float3 cam_u,
+	float3 cam_v,
+	float3 cam_w,
+
+	float3 p0World,
+	float3 p1World,
+
+	uchar4 color,
+	float lineWidthPixels,
+	bool DepthTestWhenDebugLightPath
+);
 using namespace sutil;
 static const char* vertexShaderSource = "#version 330 core\n"
 "layout (location = 0) in vec2 aPos;\n"
@@ -68,6 +92,7 @@ void disableMinimizeButton(GLFWwindow* window) {
 	SetWindowLong(hwnd, GWL_STYLE, style); // 应用新的样式
 	SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED); // 刷新窗口
 }
+
 void main() {
 	try {
 		string CUDAIncludePath = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3/include";
@@ -101,7 +126,7 @@ void main() {
 					"-IC:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3/include",
 					"-IC:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0/include",
 					"-IC:/ProgramData/NVIDIA Corporation/OptiX SDK 8.0.0/SDK",
-					"-ID:/OptixRenderer/ShaderLibrary",
+					"-ID:/OptixRenderer/ShaderLibrary"
 				};
 
 				nvrtcResult compileResult = nvrtcCompileProgram(prog, sizeof(opts)/sizeof(opts[0]), opts);
@@ -226,6 +251,13 @@ void main() {
 		CUmodule AccumulateCs = LoadModule(AccumulateCsPath);
 		CUfunction AccumulateCs_Fn = LoadFunction(AccumulateCs, "AccumulateFrame");
 
+		// 申请相机调试buffer
+		UniquePtrDevice DebugBuffer;
+		UniquePtrDevice DebugBufferPayloadLength;
+		UniquePtrDevice DepthBuffer;
+		CUDA_CHECK(cudaMalloc(DebugBuffer.GetAddressOfPtr(), DEBUG_BUFF_SIZE));
+		CUDA_CHECK(cudaMalloc(DebugBufferPayloadLength.GetAddressOfPtr(), sizeof(uint)));
+
 		scene.AddMissShader("__miss__fetchMissInfo", "module_disney_principled");
 		scene.AddRayGenerationShader("__raygen__principled_bsdf", "module_disney_principled");
 
@@ -317,16 +349,6 @@ void main() {
 		bool FirstTime = true;
 		//帧计数器
 		uint64 FrameCounter = 0;
-		//相机数据在lparams中的地址偏移
-		// 应当禁止这种操作!
-		//LaunchParameters* p = nullptr;
-		//uint64 AddressBiasOfFrameNumberInLaunchParams = (uint64)(&p->FrameNumber) - (uint64)(p);
-		//uint64 AddressBiasOfCameraDataInLaunchParams = (uint64)(&p->cameraData) - (uint64)(p);
-		//uint64 AddressBiasOfConsoleOptions = (uint64)(&p->consoleOptions) - (uint64)(p);
-		//uint64 AddressBiasOfSeedInLaunchParams = (uint64)(&p->Seed) - (uint64)(p);
-		//uint64 AddressBiasOfHeightInLaunchParams = (uint64)(&p->Height) - (uint64)(p);
-		//uint64 AddressBiasOfWidthInLaunchParams = (uint64)(&p->Width) - (uint64)(p);
-		//uint64 AddressBiasOfIndirectOutputBufferInLaunchParams = (uint64)(&p->IndirectOutputBuffer) - (uint64)(p);
 		//创建渲染纹理用于帧结果累计
 		//希望渲染纹理不要频繁申请释放
 		const uint expected_max_width = (uint)GetSystemMetrics(SM_CXSCREEN);
@@ -460,8 +482,15 @@ void main() {
 		ConsoleOptions consoleOptions;
 		ConsoleOptions* consoleOptionsDevice;
 		CUDA_CHECK(cudaMalloc(&consoleOptionsDevice, sizeof(consoleOptionsDevice)));
+		// 申请深度缓冲
+		CUDA_CHECK(cudaMalloc(DepthBuffer.GetAddressOfPtr(), default_width * default_height * sizeof(float)));
 
-		std::cout << "HitObject调试颜色：\n粉色(Miss)\n绿色(灯光)\n黄色(不透明物体)\n红色(程序化几何体)" << std::endl;
+		// 拷贝debugbuffer
+		float3* points = (float3*)malloc(DEBUG_BUFF_SIZE);
+		uint debug_buff_len;
+		bool draw_light_path = false;
+
+		std::cout << "\nHitObject调试颜色：\n粉色(Miss)\n绿色(灯光)\n黄色(不透明物体)\n红色(程序化几何体)" << std::endl;
 		while (!glfwWindowShouldClose(window))
 		{
 			static int debug_mode_current_item = 0;
@@ -516,8 +545,13 @@ void main() {
 					CUDA_CHECK(cudaMalloc(FrameBuffer2.GetAddressOfPtr(), sizeof(float3) * width * height));
 					CUDA_CHECK(cudaFree(FrameBuffer3.GetPtr()));
 					CUDA_CHECK(cudaMalloc(FrameBuffer3.GetAddressOfPtr(), sizeof(float3) * width * height));
+
+					// 重新申请深度缓冲
+					CUDA_CHECK(cudaFree(DepthBuffer.GetPtr()));
+					CUDA_CHECK(cudaMalloc(DepthBuffer.GetAddressOfPtr(), width * height * sizeof(float)));
 					//更新lparams中的参数
 					LParamsHost.IndirectOutputBuffer= (float3*)FrameBuffer2.GetPtr();
+					LParamsHost.DepthBuffer = (float*)DepthBuffer.GetPtr();
 				}
 				CUDA_CHECK(cudaDeviceSynchronize());
 				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &LParamsHost, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
@@ -557,6 +591,9 @@ void main() {
 				params.IndirectOutputBuffer = (float3*)FrameBuffer2.GetPtr();
 				params.consoleOptions = consoleOptionsDevice;
 				params.DomeLightBuffer = DomeLightBuffer.GetPtr();
+				params.DebugBuffer = DebugBuffer.GetPtr();
+				params.DebugBufferPayloadLength = (uint*)DebugBufferPayloadLength.GetPtr();
+				params.DepthBuffer = (float*)DepthBuffer.GetPtr();
 				CUDA_CHECK(cudaMemcpyAsync(LParams.GetPtr(), &params, sizeof(LaunchParameters), cudaMemcpyHostToDevice, Stream));
 			}
 
@@ -606,6 +643,39 @@ void main() {
 					nullptr);
 				cuStreamSynchronize(Stream);
 				FrameCounter++;
+				
+				// 画调试线条
+				if (debug_mode_current_item == 13 && draw_light_path) {
+					CUDA_CHECK(cudaDeviceSynchronize());
+					CameraData cdata = camera.ExportCameraData(width,height);
+					bool first_time=true;
+					bool nee=false;
+					float* depth_buffer_ptr = (float*)DepthBuffer.GetPtr();
+					for (int i = 0; i < debug_buff_len; ) {
+						float line_width = 2.0f;
+						if (first_time) {
+							LaunchDrawWorldLineParallel(devPtr, depth_buffer_ptr, width, height, cdata.cam_eye, cdata.cam_u, cdata.cam_v, cdata.cam_w,
+								points[i], points[i + 1], make_uchar4(0, 0, 255, 1), line_width, DepthTestWhenDebugLightPath);
+						}
+						else if (nee) {
+							LaunchDrawWorldLineParallel(devPtr, depth_buffer_ptr, width, height, cdata.cam_eye, cdata.cam_u, cdata.cam_v, cdata.cam_w,
+								points[i], points[i + 1], make_uchar4(0, 255, 0, 1), line_width, DepthTestWhenDebugLightPath);
+						}
+						else {
+							LaunchDrawWorldLineParallel(devPtr, depth_buffer_ptr, width, height, cdata.cam_eye, cdata.cam_u, cdata.cam_v, cdata.cam_w,
+								points[i], points[i + 1], make_uchar4(255, 0, 0, 1), line_width, DepthTestWhenDebugLightPath);
+						}
+						
+						i = i + 2;
+						if (first_time) {
+							first_time = false;
+						}
+						else {
+							nee = !nee;
+						}
+					}
+					CUDA_CHECK(cudaDeviceSynchronize());
+				}
 			}
 
 			CUDA_CHECK(cudaStreamSynchronize(Stream));
@@ -635,12 +705,26 @@ void main() {
 			ImGui::NewFrame();
 
 			ImGui::Begin("Debug Console");
+			ImGui::Checkbox("DepthTestWhenDebugLightPath", &DepthTestWhenDebugLightPath);
 			if (ImGui::Button("Capture"))
 			{
 				std::cout << "截取屏幕" << std::endl;
 				uchar4* FrameBufferHost = (uchar4*)malloc(sizeof(uchar4) * width * height);
 				CUDA_CHECK(cudaMemcpy(FrameBufferHost, devPtr, sizeof(uchar4) * width * height, cudaMemcpyDeviceToHost));
 				SaveUchar4Image(FrameBufferHost, width, height, ("D:/OptixRenderer/ScreenShot/" + GetTimeString()+".png").c_str());
+			}
+			if (ImGui::Button("Capture LightPath") && debug_mode_current_item == 13) {
+				CUDA_CHECK(cudaMemcpy(points, DebugBuffer.GetPtr(), DEBUG_BUFF_SIZE, cudaMemcpyDeviceToHost));
+				CUDA_CHECK(cudaMemcpy(&debug_buff_len, DebugBufferPayloadLength.GetPtr(), sizeof(uint), cudaMemcpyDeviceToHost));
+				CUDA_CHECK(cudaDeviceSynchronize());
+				for (int i = 0; i < debug_buff_len;) {
+					std::cout << "起始：" << points[i].x << "," << points[i].y << "," << points[i].z;
+					i += 1;
+					std::cout << "  终点：" << points[i].x << "," << points[i].y << "," << points[i].z << std::endl;
+					i += 1;
+				}
+				std::cout << "\n" << std::endl;
+				draw_light_path = true;
 			}
 			ImGui::Combo("Debug Mode", &debug_mode_current_item, debugModeItems, IM_ARRAYSIZE(debugModeItems));
 			ImGui::Combo("Frame Accumulation Mode", &accumulate_frame_mode, frameAccumulationItems, IM_ARRAYSIZE(frameAccumulationItems));
@@ -654,12 +738,13 @@ void main() {
 			start = end;
 			stringstream ss;
 			auto elapsed = duration_cast<seconds>(high_resolution_clock::now() - initialTime).count();
-			ss << "Optix Renderer  fps:" << to_string_with_precision(1000.0f / delta_time,0) <<" W: "<< width << " H: "<<height << " Time elapsed:" << elapsed << endl;
+			ss << "Optix Renderer  fps:" << to_string_with_precision(1000.0f / delta_time,0) <<" W: "<< width << " H: "<<height << " Time elapsed:" << elapsed << " Spp:"<< FrameCounter << endl;
 			glfwSetWindowTitle(window, ss.str().c_str());
 			FrameNumber++;
 			CUDA_CHECK(cudaStreamSynchronize(Stream));
 			glfwSwapBuffers(window);
 		}
+		free(points);
 		ImGui_ImplOpenGL3_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
 		ImGui::DestroyContext();

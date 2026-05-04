@@ -1,34 +1,34 @@
 #pragma once
 #include "common.cuh"
 
-static DEVICE INLINE PerRayData FetchPerRayDataFromPayLoad() {
-	PerRayData data;
-	data.Radience.x = __uint_as_float(optixGetPayload_0());
-	data.Radience.y = __uint_as_float(optixGetPayload_1());
-	data.Radience.z = __uint_as_float(optixGetPayload_2());
-
-	data.RecursionDepth = optixGetPayload_3();
-	data.Seed = optixGetPayload_4();
-	data.RayHitType = optixGetPayload_5();
-
-	data.DebugData.x = __uint_as_float(optixGetPayload_6());
-	data.DebugData.y = __uint_as_float(optixGetPayload_7());
-	data.DebugData.z = __uint_as_float(optixGetPayload_8());
-	return data;
-}
-static DEVICE INLINE void SetPerRayDataForPayLoad(PerRayData data) {
-	optixSetPayload_0(__float_as_uint(data.Radience.x));
-	optixSetPayload_1(__float_as_uint(data.Radience.y));
-	optixSetPayload_2(__float_as_uint(data.Radience.z));
-
-	optixSetPayload_3(data.RecursionDepth);
-	optixSetPayload_4(data.Seed);
-	optixSetPayload_5(data.RayHitType);
-
-	optixSetPayload_6(__float_as_uint(data.DebugData.x));
-	optixSetPayload_7(__float_as_uint(data.DebugData.y));
-	optixSetPayload_8(__float_as_uint(data.DebugData.z));
-}
+//static DEVICE INLINE PerRayData FetchPerRayDataFromPayLoad() {
+//	PerRayData data;
+//	data.Radience.x = __uint_as_float(optixGetPayload_0());
+//	data.Radience.y = __uint_as_float(optixGetPayload_1());
+//	data.Radience.z = __uint_as_float(optixGetPayload_2());
+//
+//	data.RecursionDepth = optixGetPayload_3();
+//	data.Seed = optixGetPayload_4();
+//	data.RayHitType = optixGetPayload_5();
+//
+//	data.DebugData.x = __uint_as_float(optixGetPayload_6());
+//	data.DebugData.y = __uint_as_float(optixGetPayload_7());
+//	data.DebugData.z = __uint_as_float(optixGetPayload_8());
+//	return data;
+//}
+//static DEVICE INLINE void SetPerRayDataForPayLoad(PerRayData data) {
+//	optixSetPayload_0(__float_as_uint(data.Radience.x));
+//	optixSetPayload_1(__float_as_uint(data.Radience.y));
+//	optixSetPayload_2(__float_as_uint(data.Radience.z));
+//
+//	optixSetPayload_3(data.RecursionDepth);
+//	optixSetPayload_4(data.Seed);
+//	optixSetPayload_5(data.RayHitType);
+//
+//	optixSetPayload_6(__float_as_uint(data.DebugData.x));
+//	optixSetPayload_7(__float_as_uint(data.DebugData.y));
+//	optixSetPayload_8(__float_as_uint(data.DebugData.z));
+//}
 static DEVICE INLINE ModelData* GetModelDataPtr() {
 	SbtDataStruct* SbtDataStructPtr = (SbtDataStruct*)optixGetSbtDataPointer();
 	return (ModelData*)SbtDataStructPtr->DataPtr;
@@ -41,8 +41,26 @@ static DEVICE INLINE GeometryBuffer* GetGeometryDataPtr() {
 	ModelData* DataPtr = GetModelDataPtr();
 	return DataPtr->GeometryData;
 }
+
+static DEVICE INLINE ModelData* GetModelDataPtr(HitInfo hitinfo) {
+	SbtDataStruct* SbtDataStructPtr = (SbtDataStruct*)hitinfo.SbtDataPtr;
+	return (ModelData*)SbtDataStructPtr->DataPtr;
+}
+static DEVICE INLINE Material* GetMaterialDataPtr(HitInfo hitinfo) {
+	ModelData* DataPtr = GetModelDataPtr(hitinfo);
+	return DataPtr->MaterialData;
+}
+static DEVICE INLINE GeometryBuffer* GetGeometryDataPtr(HitInfo hitinfo) {
+	ModelData* DataPtr = GetModelDataPtr(hitinfo);
+	return DataPtr->GeometryData;
+}
 static DEVICE INLINE  float3 GetBaryCentrics() {
 	const float2 b = optixGetTriangleBarycentrics();//x是2号顶点的坐标，y是三号顶点的坐标，不知道为什么这么设计
+	return make_float3(1 - b.x - b.y, b.x, b.y);
+}
+
+static DEVICE INLINE  float3 GetBaryCentrics(HitInfo hitinfo) {
+	const float2 b = hitinfo.TriangleCentroidCoord;//x是2号顶点的坐标，y是三号顶点的坐标，不知道为什么这么设计
 	return make_float3(1 - b.x - b.y, b.x, b.y);
 }
 static DEVICE INLINE float3 GetNormal() {
@@ -65,6 +83,18 @@ static DEVICE INLINE float3 GetPosition() {
 	float3 Vertices3 = VerticesPtr[3 * primIndex + 2];
 	return Vertices1 * Centrics.x + Vertices2 * Centrics.y + Vertices3 * Centrics.z;
 }
+
+static DEVICE INLINE float3 GetPosition(HitInfo hitinfo) {
+	GeometryBuffer* GeometryDataPtr = GetGeometryDataPtr(hitinfo);
+	float3* VerticesPtr = (float3*)GeometryDataPtr->Vertices;
+	const uint primIndex = hitinfo.PrimitiveID;
+	float3 Centrics = GetBaryCentrics(hitinfo);
+	float3 Vertices1 = VerticesPtr[3 * primIndex];
+	float3 Vertices2 = VerticesPtr[3 * primIndex + 1];
+	float3 Vertices3 = VerticesPtr[3 * primIndex + 2];
+	return Vertices1 * Centrics.x + Vertices2 * Centrics.y + Vertices3 * Centrics.z;
+}
+
 static DEVICE INLINE void GetTriangle(float3& v1,float3& v2,float3& v3) {
 	GeometryBuffer* GeometryDataPtr = GetGeometryDataPtr();
 	float3* VerticesPtr = (float3*)GeometryDataPtr->Vertices;
@@ -110,86 +140,86 @@ static INLINE DEVICE void ComputeRayWithJitter(uint3 idx, uint3 dim, float3& ori
 	origin = RayTracingGlobalParams.cameraData.cam_eye;
 	direction = normalize(d.x * U + d.y * V + W);
 }
-static INLINE DEVICE void optixTraceWithPerRayData(
-	PerRayData& data,
-	float3 RayOrigin,
-	float3 RayDirection,
-	float Tmin,
-	uint SBTOffset,
-	uint SBTStride,
-	uint MissSBTIndex) {
-	uint p0, p1, p2, p3, p4, p5, p6,p7,p8;
-	p0 = __float_as_uint(data.Radience.x);
-	p1 = __float_as_uint(data.Radience.y);
-	p2 = __float_as_uint(data.Radience.z);
-	p3 = data.RecursionDepth;
-	p4 = data.Seed;
-	p5 = data.RayHitType;
-	p6 = __float_as_uint(data.DebugData.x);
-	p7 = __float_as_uint(data.DebugData.y);
-	p8 = __float_as_uint(data.DebugData.z);
-	optixTrace(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
-		SBTOffset, SBTStride, MissSBTIndex,
-		p0, p1, p2, p3, p4, p5,p6,p7,p8);
-	//optixReorder();
-	//optixInvoke(p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14);
-	data.Radience.x = __uint_as_float(p0);
-	data.Radience.y = __uint_as_float(p1);
-	data.Radience.z = __uint_as_float(p2);
-	data.RecursionDepth = p3;
-	data.Seed = p4;
-	data.RayHitType = p5;
-	data.DebugData.x = __uint_as_float(p6);
-	data.DebugData.y = __uint_as_float(p7);
-	data.DebugData.z = __uint_as_float(p8);
-}
-static INLINE DEVICE void optixTraceWithPerRayDataReordered(
-	PerRayData& data,
-	float3 RayOrigin,
-	float3 RayDirection,
-	float Tmin,
-	uint SBTOffset,
-	uint SBTStride,
-	uint MissSBTIndex) {
-	uint p0, p1, p2, p3, p4, p5, p6, p7, p8;
-	p0 = __float_as_uint(data.Radience.x);
-	p1 = __float_as_uint(data.Radience.y);
-	p2 = __float_as_uint(data.Radience.z);
-	p3 = data.RecursionDepth;
-	p4 = data.Seed;
-	p5 = data.RayHitType;
-	p6 = __float_as_uint(data.DebugData.x);
-	p7 = __float_as_uint(data.DebugData.y);
-	p8 = __float_as_uint(data.DebugData.z);
-	optixTraverse(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
-		SBTOffset, SBTStride, MissSBTIndex,
-		p0, p1, p2, p3, p4, p5, p6, p7, p8);
-	optixReorder();
-	optixInvoke(p0, p1, p2, p3, p4, p5, p6, p7, p8);
-	data.Radience.x = __uint_as_float(p0);
-	data.Radience.y = __uint_as_float(p1);
-	data.Radience.z = __uint_as_float(p2);
-	data.RecursionDepth = p3;
-	data.Seed = p4;
-	data.RayHitType = p5;
-	data.DebugData.x = __uint_as_float(p6);
-	data.DebugData.y = __uint_as_float(p7);
-	data.DebugData.z = __uint_as_float(p8);
-}
-static INLINE DEVICE void optixTraceWithPerRayData(
-	PerRayData& data,
-	float3 RayOrigin,
-	float3 RayDirection,
-	uint SBTOffset,
-	uint SBTStride,
-	uint MissSBTIndex) {
-	optixTraceWithPerRayData(
-		data,
-		RayOrigin,
-		RayDirection,
-		1e-4f,
-		SBTOffset,
-		SBTStride,
-		MissSBTIndex);
-}
+//static INLINE DEVICE void optixTraceWithPerRayData(
+//	PerRayData& data,
+//	float3 RayOrigin,
+//	float3 RayDirection,
+//	float Tmin,
+//	uint SBTOffset,
+//	uint SBTStride,
+//	uint MissSBTIndex) {
+//	uint p0, p1, p2, p3, p4, p5, p6,p7,p8;
+//	p0 = __float_as_uint(data.Radience.x);
+//	p1 = __float_as_uint(data.Radience.y);
+//	p2 = __float_as_uint(data.Radience.z);
+//	p3 = data.RecursionDepth;
+//	p4 = data.Seed;
+//	p5 = data.RayHitType;
+//	p6 = __float_as_uint(data.DebugData.x);
+//	p7 = __float_as_uint(data.DebugData.y);
+//	p8 = __float_as_uint(data.DebugData.z);
+//	optixTrace(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
+//		SBTOffset, SBTStride, MissSBTIndex,
+//		p0, p1, p2, p3, p4, p5,p6,p7,p8);
+//	//optixReorder();
+//	//optixInvoke(p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14);
+//	data.Radience.x = __uint_as_float(p0);
+//	data.Radience.y = __uint_as_float(p1);
+//	data.Radience.z = __uint_as_float(p2);
+//	data.RecursionDepth = p3;
+//	data.Seed = p4;
+//	data.RayHitType = p5;
+//	data.DebugData.x = __uint_as_float(p6);
+//	data.DebugData.y = __uint_as_float(p7);
+//	data.DebugData.z = __uint_as_float(p8);
+//}
+//static INLINE DEVICE void optixTraceWithPerRayDataReordered(
+//	PerRayData& data,
+//	float3 RayOrigin,
+//	float3 RayDirection,
+//	float Tmin,
+//	uint SBTOffset,
+//	uint SBTStride,
+//	uint MissSBTIndex) {
+//	uint p0, p1, p2, p3, p4, p5, p6, p7, p8;
+//	p0 = __float_as_uint(data.Radience.x);
+//	p1 = __float_as_uint(data.Radience.y);
+//	p2 = __float_as_uint(data.Radience.z);
+//	p3 = data.RecursionDepth;
+//	p4 = data.Seed;
+//	p5 = data.RayHitType;
+//	p6 = __float_as_uint(data.DebugData.x);
+//	p7 = __float_as_uint(data.DebugData.y);
+//	p8 = __float_as_uint(data.DebugData.z);
+//	optixTraverse(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, 1e16f, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
+//		SBTOffset, SBTStride, MissSBTIndex,
+//		p0, p1, p2, p3, p4, p5, p6, p7, p8);
+//	optixReorder();
+//	optixInvoke(p0, p1, p2, p3, p4, p5, p6, p7, p8);
+//	data.Radience.x = __uint_as_float(p0);
+//	data.Radience.y = __uint_as_float(p1);
+//	data.Radience.z = __uint_as_float(p2);
+//	data.RecursionDepth = p3;
+//	data.Seed = p4;
+//	data.RayHitType = p5;
+//	data.DebugData.x = __uint_as_float(p6);
+//	data.DebugData.y = __uint_as_float(p7);
+//	data.DebugData.z = __uint_as_float(p8);
+//}
+//static INLINE DEVICE void optixTraceWithPerRayData(
+//	PerRayData& data,
+//	float3 RayOrigin,
+//	float3 RayDirection,
+//	uint SBTOffset,
+//	uint SBTStride,
+//	uint MissSBTIndex) {
+//	optixTraceWithPerRayData(
+//		data,
+//		RayOrigin,
+//		RayDirection,
+//		1e-4f,
+//		SBTOffset,
+//		SBTStride,
+//		MissSBTIndex);
+//}
 

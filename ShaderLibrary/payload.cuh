@@ -8,6 +8,7 @@ DEVICE void SetPayLoad(HitInfo& payload){
     optixSetPayload_3(__float_as_uint(payload.TriangleCentroidCoord.x));
     optixSetPayload_4(__float_as_uint(payload.TriangleCentroidCoord.y));
     optixSetPayload_5(payload.surfaceType);
+    optixSetPayload_6(__float_as_uint(payload.T));
 }
 
 DEVICE void GetPayLoad(HitInfo& payload) {
@@ -16,6 +17,7 @@ DEVICE void GetPayLoad(HitInfo& payload) {
     payload.TriangleCentroidCoord.x=__uint_as_float(optixGetPayload_3());
     payload.TriangleCentroidCoord.y=__uint_as_float(optixGetPayload_4());
     payload.surfaceType=(SurfaceType)optixGetPayload_5();
+    payload.T = __uint_as_float(optixGetPayload_6());
 }
 
 DEVICE void TraceRay(
@@ -26,19 +28,21 @@ DEVICE void TraceRay(
     uint SBTOffset,
     uint SBTStride,
     uint MissSBTIndex) {
-    uint p0,p1,p2,p3,p4,p5;
+    uint p0,p1,p2,p3,p4,p5,p6;
     p0=payload.PrimitiveID;
     p1=getLow4Bytes(payload.SbtDataPtr);
     p2=getHigh4Bytes(payload.SbtDataPtr);
     p3=__float_as_uint(payload.TriangleCentroidCoord.x);
     p4=__float_as_uint(payload.TriangleCentroidCoord.y);
     p5=payload.surfaceType;
+    p6 = __float_as_uint(payload.T);
     optixTrace(RayTracingGlobalParams.Handle, RayOrigin, RayDirection, Tmin, TMAX, 0.0f, OptixVisibilityMask(255), OPTIX_RAY_FLAG_NONE,
         SBTOffset, SBTStride, MissSBTIndex,
-        p0,p1,p2,p3,p4,p5);
+        p0,p1,p2,p3,p4,p5,p6);
     payload.PrimitiveID=p0;
     payload.SbtDataPtr=combineToUint64(p2,p1);
     payload.TriangleCentroidCoord.x=__uint_as_float(p3);
     payload.TriangleCentroidCoord.y=__uint_as_float(p4);
     payload.surfaceType=(SurfaceType)p5;
+    payload.T = __uint_as_float(p6);
 }

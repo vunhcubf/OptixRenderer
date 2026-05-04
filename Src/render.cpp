@@ -126,7 +126,7 @@ OptixDeviceContext CreateContext()
 	OptixDeviceContextOptions options = {};
 	options.logCallbackFunction = &context_log_cb;
 	options.logCallbackLevel = 4;
-#if defined _DEBUG
+#if 0
 	options.validationMode = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
 #endif
 	OPTIX_CHECK(optixDeviceContextCreate(CudaContext, 0, &Context));
@@ -142,7 +142,7 @@ OptixPipelineCompileOptions CreatePipelineCompileOptions(uint TraversableGraphFl
 	PipelineCompileOpts.numPayloadValues = NumPayloadValue;
 	PipelineCompileOpts.numAttributeValues = NumAttributeValues;//相交时的属性数
 	//检测所有的异常
-#if defined _DEBUG
+#if 0
 	PipelineCompileOpts.exceptionFlags = OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW | OPTIX_EXCEPTION_FLAG_TRACE_DEPTH | OPTIX_EXCEPTION_FLAG_USER;
 #endif
 	PipelineCompileOpts.pipelineLaunchParamsVariableName = "RayTracingGlobalParams";//启动参数的名字，通常是输出的图片

@@ -180,8 +180,8 @@ static DEVICE float3 TransmissionBtdf(SurfaceData& surfaceData,
 	return ASSERT_VALID((surfaceData.Transmission) * (1 - surfaceData.Metallic) * numerator / fmaxf(denominator, FloatEpsilon));
 }
 
-DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& IsTransmission,float3& H) {
-	bool InSurface = dot(surfaceData.VertexNormal, V) >= 0.0f;
+DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& IsTransmission,float3& H,bool& RayAbsorbed) {
+	bool InSurface = dot(surfaceData.FaceNormal, V) >= 0.0f; // V是否从表面外射向着色点
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
 	// 与射线方向同向的法线
@@ -199,6 +199,10 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 		float3 L = ASSERT_VALID(refract(-V, HForward, EtaI / EtaO, nullptr));
 		IsTransmission = true;
 		H = ASSERT_VALID(HForward);
+		// 折射射线
+		// 若折射射线没有进入到另一侧，就算吸收
+		bool LOutSurface = dot(surfaceData.FaceNormal, L) >= 0.0f; // L是否从表面外射出着色点
+		RayAbsorbed = InSurface == LOutSurface;
 		return ASSERT_VALID(saturateRay(normalize(L)));
 	}
 	else {
@@ -212,18 +216,18 @@ DEVICE float3 SampleBsdf(SurfaceData& surfaceData,float3 noise,float3 V,bool& Is
 			L = ASSERT_VALID(ImportanceSampleCosWeight(make_float2(noise.x, noise.y), NForward));
 			H = ASSERT_VALID(normalize(V + L));
 		}
-		L = ASSERT_VALID(ClampRayDir(L, InSurface ? surfaceData.VertexNormal : -surfaceData.VertexNormal));
+		bool LOutSurface = dot(surfaceData.FaceNormal, L) >= 0.0f; // L是否从表面外射出着色点
+		RayAbsorbed = InSurface != LOutSurface;
 		return ASSERT_VALID(saturateRay(normalize(L)));
 	}
 }
 DEVICE float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmission,float3 HForward) {
-	bool InSurface = dot(surfaceData.VertexNormal, V) >= 0.0f;
+	bool InSurface = dot(surfaceData.FaceNormal, V) >= 0.0f; // V是否从表面外射向着色点
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
-	// 与射线方向同向的法线surfaceData.Normal
+	// 与V方向同向的法线surfaceData.Normal
 	float3 NForward = InSurface ? surfaceData.Normal : -surfaceData.Normal;
 
-	
 	float QReflect = 1;
 	float QDiffuse = (1 - surfaceData.Metallic) * (1 - surfaceData.Transmission);
 	float QTransmission = (1 - surfaceData.Metallic) * surfaceData.Transmission * (1 - DielectricFresnel(HForward, V, EtaI, EtaO));
@@ -234,6 +238,7 @@ DEVICE float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmi
 
 	float PdfM = DistributionGGX(HForward, NForward, surfaceData.Roughness) * abs(dot(HForward, NForward));
 	if (IsTransmission) {
+		if (surfaceData.Transmission == 0.0f) return 0;
 		float JacobTransmission = EtaO * EtaO * abs(dot(L, HForward)) / pow2(EtaI * dot(V, HForward) + EtaO * dot(L, HForward));
 		float PdfTransmission = PdfM * JacobTransmission;
 		return ASSERT_VALID(PdfTransmission * QTransmission);
@@ -247,7 +252,7 @@ DEVICE float EvalPdf(SurfaceData& surfaceData, float3 V, float3 L,bool IsTransmi
 }
 
 DEVICE float3 EvalBsdf(SurfaceData& surfaceData, float3 V, float3 L, bool IsTransmission, float3 HForward) {
-	bool InSurface = dot(surfaceData.VertexNormal, V) >= 0.0f;
+	bool InSurface = dot(surfaceData.FaceNormal, V) >= 0.0f;
 	float EtaI = InSurface ? 1 : surfaceData.ior;
 	float EtaO = InSurface ? surfaceData.ior : 1;
 	// 与V方向同向的法线
@@ -262,6 +267,7 @@ DEVICE float3 EvalBsdf(SurfaceData& surfaceData, float3 V, float3 L, bool IsTran
 
 	float PdfM = DistributionGGX(HForward, NForward, surfaceData.Roughness) * abs(dot(HForward, NForward));
 	if (IsTransmission) {
+		if (surfaceData.Transmission == 0) return make_float3(0.0f);
 		return ASSERT_VALID(dot(NForward, L) < 0.0f ? TransmissionBtdf(surfaceData, NForward, HForward, V, L, EtaO, EtaI) * saturate(-dot(NForward, L)) : make_float3(0));
 	}
 	else {
@@ -269,14 +275,14 @@ DEVICE float3 EvalBsdf(SurfaceData& surfaceData, float3 V, float3 L, bool IsTran
 	}
 }
 
-DEVICE float3 PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData,float3 Noise3, float3 V, float3& BxdfWeight, bool& IsTransmission) {
-	float3 HForward;
-	float3 L = SampleBsdf(surfaceData, Noise3, V, IsTransmission, HForward);
-	float pdf = EvalPdf(surfaceData, V, L, IsTransmission, HForward);
-	float3 Bsdf = EvalBsdf(surfaceData, V, L, IsTransmission, HForward);
-	BxdfWeight = Bsdf / pdf;
-	return L;
-}
+//DEVICE float3 PrincipledBsdf(uint RecursionDepth, SurfaceData surfaceData,float3 Noise3, float3 V, float3& BxdfWeight, bool& IsTransmission) {
+//	float3 HForward;
+//	float3 L = SampleBsdf(surfaceData, Noise3, V, IsTransmission, HForward);
+//	float pdf = EvalPdf(surfaceData, V, L, IsTransmission, HForward);
+//	float3 Bsdf = EvalBsdf(surfaceData, V, L, IsTransmission, HForward);
+//	BxdfWeight = Bsdf / pdf;
+//	return L;
+//}
 
 DEVICE INLINE bool IsRayContributeToBtdf(float3 RayDir,float3 VertexNormal,float3 V) {
 	bool InSurface = dot(VertexNormal, V) >= 0.0f;

@@ -182,12 +182,23 @@ enum class ConsoleDebugMode :int {
     FinalRadianceIndirect = 9,
     FinalRadianceDirect = 10,
     FinalWeight = 11,
-    FinalWeightClip = 12
+    FinalWeightClip = 12,
+     
+    DebugLightPath = 13,
+    DebugGlobalLightPath = 14
 };
 struct ConsoleOptions {
     ConsoleDebugMode debugMode;
     FrameAccumulationOptions frameAccumulationOptions;
 };
+struct PixelIterationContext {
+    static const uint SizeofPixelContext = 11;
+    float3 BxdfRayDir;
+    float3 NeeRayDir;
+    float BxdfRayT;
+    float NeeRayT;
+    float3 ShadingPointPos;
+}; // 把一个像素一次跌倒的的数据全都扒下来
 struct LaunchParameters {
     float3* IndirectOutputBuffer;
     uchar4* ImagePtr;
@@ -203,6 +214,9 @@ struct LaunchParameters {
     uint LightListLength;
     ConsoleOptions* consoleOptions;
     void* DomeLightBuffer;
+    void* DebugBuffer;
+    uint* DebugBufferPayloadLength;
+    float* DepthBuffer;
 };
 struct ModelData {
     GeometryBuffer* GeometryData;

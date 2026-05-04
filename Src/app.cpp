@@ -510,24 +510,10 @@ void SceneManager::BuildSceneWithProceduralGeometrySupported() {
 	pipeLine = CreatePipeline(Context, pipelineCompileOptions, shaders_array, MaxRayRecursiveDepth, MaxSceneTraversalDepth);
 }
 
-void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, CameraData cameraData, uint Width, uint Height, uint Spp)
-{
-	LaunchParameters params;
-	params.ImagePtr = FrameBuffer;
-	params.Width = Width;
-	params.Height = Height;
-	params.Handle = this->TASHandle;
-	params.Seed = static_cast<uint>(rand());
-	params.cameraData = cameraData;
-	params.Spp = Spp;
-	params.MaxRecursionDepth = MaxRayRecursiveDepth;
-	LaunchParameter = UploadAnything(&params, sizeof(LaunchParameters));
-	OPTIX_CHECK(optixLaunch(this->pipeLine, Stream, (CUdeviceptr)LaunchParameter.GetPtr(), sizeof(LaunchParameters), &Sbt, Width, Height, 1));
-	CUDA_CHECK(cudaStreamSynchronize(Stream));
-}
 void SceneManager::DispatchRays(uchar4* FrameBuffer, CUstream& Stream, LaunchParameters* LParams, uint Width, uint Height)
 {
 	OPTIX_CHECK(optixLaunch(this->pipeLine, Stream, (CUdeviceptr)LParams, sizeof(LaunchParameters), &Sbt, Width, Height,1));
+	CUDA_CHECK(cudaGetLastError());
 	CUDA_CHECK(cudaStreamSynchronize(Stream));
 }
 //WASDEQ--

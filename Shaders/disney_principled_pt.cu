@@ -15,8 +15,12 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
     // 主体为一个循环，循环开始时根据上一个循环或rg产生的射线方向进行一次追踪。
     // 计算间接光的权重和直接光的辐射
     const uint3 idx = optixGetLaunchIndex();
+
     uint pixel_id = idx.y * RayTracingGlobalParams.Width + idx.x;
     const uint3 dim = optixGetLaunchDimensions();
+    RayTracingGlobalParams.DepthBuffer[pixel_id] = 1e30;
+
+    uint2 center = make_uint2(RayTracingGlobalParams.Width / 2, RayTracingGlobalParams.Height / 2);
 
     float3 RayOrigin, RayDirection;
     float2 jitter = ASSERT_VALID(Hammersley(RayTracingGlobalParams.FrameNumber % 32, 32));
@@ -30,6 +34,14 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
     // 首先发射primary ray
     HitInfo hitInfo;
     TraceRay(hitInfo, RayOrigin, RayDirection, TMIN, 0, 1, 0);
+    // 记录primary ray
+    if (idx.x == center.x && idx.y == center.y && CONSOLE_OPTIONS->debugMode==ConsoleDebugMode::DebugLightPath) {
+        // 写入debugbuffer
+        // 这跟光线的起点终点
+        ((float3*)RayTracingGlobalParams.DebugBuffer)[0] = RayOrigin;
+        ((float3*)RayTracingGlobalParams.DebugBuffer)[1] = RayOrigin + hitInfo.T * RayDirection;
+        RayTracingGlobalParams.DebugBufferPayloadLength[0] = 2;
+    }
     
     float3 DebugColor = ASSERT_VALID(make_float3(0));
 
@@ -67,10 +79,17 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
         SurfaceData surfaceData;
         surfaceData.Clear();
         surfaceData.Load(hitInfo);
+        if (RecursionDepth == 0) {
+            float depth;
+            float2 NDC;
+            WorldToNDC_LH(surfaceData.Position, NDC, depth);
+            RayTracingGlobalParams.DepthBuffer[pixel_id]= depth;
+        }
         // 从一个表面开始
         // X表示Bxdf射线
         // Y表示NEE
         bool IsTransmissionBxdfRay;
+        bool BxdfRayAbsorbed;
         // bxdf射线的bxdf概率
         float Pf_X = 0;
         float Pg_Y = 0;
@@ -84,12 +103,21 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
         // 生成bxdf射线
         {
             float3 HForward;
-            RayDirection = ASSERT_VALID(SampleBsdf(surfaceData, make_float3(Noise4.x, Noise4.y, Noise4.z), V, IsTransmissionBxdfRay, HForward));
+            RayDirection = ASSERT_VALID(SampleBsdf(surfaceData, make_float3(Noise4.x, Noise4.y, Noise4.z), V, IsTransmissionBxdfRay, HForward, BxdfRayAbsorbed));
             Pf_X = ASSERT_VALID(EvalPdf(surfaceData, V, RayDirection, IsTransmissionBxdfRay, HForward));
             BsdfIndirect = ASSERT_VALID(EvalBsdf(surfaceData, V, RayDirection, IsTransmissionBxdfRay, HForward));
         }
 
         TraceRay(hitInfo, surfaceData.Position, RayDirection, TMIN, 0, 1, 0);
+        // bsdf ray
+        if (idx.x == center.x && idx.y == center.y && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::DebugLightPath) {
+            // 写入debugbuffer
+            // 这跟光线的起点终点
+            ((float3*)RayTracingGlobalParams.DebugBuffer)[RayTracingGlobalParams.DebugBufferPayloadLength[0]] = surfaceData.Position;
+            RayTracingGlobalParams.DebugBufferPayloadLength[0] += 1;
+            ((float3*)RayTracingGlobalParams.DebugBuffer)[RayTracingGlobalParams.DebugBufferPayloadLength[0]] = surfaceData.Position + hitInfo.T * RayDirection;
+            RayTracingGlobalParams.DebugBufferPayloadLength[0] += 1;
+        }
         
         if ((RecursionDepth==0 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FirstBsdfRayHitObject) ||
             (RecursionDepth == 1 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::SecondBsdfRayHitObject) ||
@@ -117,10 +145,10 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 
         // 若光线出现在错误的表面则terminateRay
         if (IsTransmissionBxdfRay) {
-            terminateRay = !IsRayContributeToBtdf(RayDirection, surfaceData.VertexNormal, V);
+            terminateRay = !IsRayContributeToBtdf(RayDirection, surfaceData.FaceNormal, V);
         }
         else {
-            terminateRay = IsRayContributeToBtdf(RayDirection, surfaceData.VertexNormal, V);
+            terminateRay = IsRayContributeToBtdf(RayDirection, surfaceData.FaceNormal, V);
         }
         // 生成nee射线
         bool IsSampleDomeLight = false;
@@ -142,6 +170,15 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
             
             HitInfo hitInfoDirectLight;
             TraceRay(hitInfoDirectLight, surfaceData.Position, RayDirDirectLight, TMIN, 0, 1, 0);
+            // nee ray
+            if (idx.x == center.x && idx.y == center.y && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::DebugLightPath) {
+                // 写入debugbuffer
+                // 这跟光线的起点终点
+                ((float3*)RayTracingGlobalParams.DebugBuffer)[RayTracingGlobalParams.DebugBufferPayloadLength[0]] = surfaceData.Position;
+                RayTracingGlobalParams.DebugBufferPayloadLength[0] += 1;
+                ((float3*)RayTracingGlobalParams.DebugBuffer)[RayTracingGlobalParams.DebugBufferPayloadLength[0]] = surfaceData.Position + hitInfoDirectLight.T * RayDirDirectLight;
+                RayTracingGlobalParams.DebugBufferPayloadLength[0] += 1;
+            }
 
             if ((RecursionDepth == 0 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::FirstNEERayHitObject) ||
                 (RecursionDepth == 1 && CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::SecondNEERayHitObject) ||
@@ -169,7 +206,7 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
                 ? ASSERT_VALID(GetSkyBoxColor(hitInfoDirectLight.SbtDataPtr, RayDirDirectLight))
                 : ASSERT_VALID(make_float3(0.0f));
             // 判断光源射线是对brdf做贡献，还是对btdf做贡献
-            bool NEERayContributeToBtdf = IsRayContributeToBtdf(RayDirection, surfaceData.VertexNormal, V);
+            bool NEERayContributeToBtdf = IsRayContributeToBtdf(RayDirection, surfaceData.FaceNormal, V);
             BsdfDirect = ASSERT_VALID(EvalBsdf(surfaceData, V, RayDirDirectLight, NEERayContributeToBtdf, normalize(V + RayDirDirectLight)));
             // 光源射线在bxdf的概率
             Pf_Y = ASSERT_VALID(EvalPdf(surfaceData, V, RayDirDirectLight, NEERayContributeToBtdf, normalize(V + RayDirDirectLight)));
@@ -188,28 +225,22 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
 
             // 现在考虑bxdf射线命中了哪里
             // 若命中光源，统计辐射并结束，若命中物体，累计bxdf射线的bsdf值
-            bool BxdfRayHitLightSrc = false;
             float3 LiBxdf=make_float3(0.0f);
             if (hitInfo.surfaceType == SurfaceType::Miss) {
                 LiBxdf += ASSERT_VALID(GetSkyBoxColor(hitInfo.SbtDataPtr, RayDirection));
                 terminateRay = true;
-                BxdfRayHitLightSrc = true;
             }
             else if (hitInfo.surfaceType == SurfaceType::Light) {
                 LiBxdf += ASSERT_VALID(GetColorFromAnyLight(FetchLightData(GetSbtDataPointer<ProceduralGeometryMaterialBuffer>(hitInfo.SbtDataPtr))));
                 terminateRay = true;
-                BxdfRayHitLightSrc = true;
+            }
+            else if (BxdfRayAbsorbed) {
+                // 光线没有射到正确的平面被吸收了
+                terminateRay = true;
             }
 
-            if (BxdfRayHitLightSrc) {
-                radianceIndirect = LiBxdf * BsdfIndirect / (Pf_X + Pg_X);
-            }
-            else {
-                ASSERT_VALID(Pf_X);
-                ASSERT_VALID(Weight);
-                ASSERT_VALID(BsdfIndirect);
-                WeightNew = ASSERT_VALID(Weight * BsdfIndirect / (Pf_X + 1e-7f));
-            }
+            radianceIndirect = LiBxdf * BsdfIndirect / (Pf_X + Pg_X);
+            WeightNew = ASSERT_VALID(Weight * BsdfIndirect / (fmaxf(Pf_X,1e-4f)));
 
             Radiance += ASSERT_VALID(Weight * radianceDirect);
             if (terminateRay) {
@@ -254,13 +285,17 @@ extern "C" GLOBAL void __raygen__principled_bsdf() {
         RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(ValueClip(Weight));
         return;
     }
-    if (CONSOLE_OPTIONS->debugMode != ConsoleDebugMode::NoDebug) {
-        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(DebugColor);
+
+    if (CONSOLE_OPTIONS->debugMode == ConsoleDebugMode::DebugLightPath) {
+        int2 len2 = make_int2(((int)idx.x - (int)RayTracingGlobalParams.Width / 2), ((int)idx.y - (int)RayTracingGlobalParams.Height / 2));
+        len2 = make_int2(len2.x * len2.x, len2.y * len2.y);
+        if (len2.x + len2.y < 6) {
+            RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(make_float3(1,0,0));
+            return;
+        }
     }
-    else {
-        RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(Radiance);
-    }
-    
+
+    RayTracingGlobalParams.IndirectOutputBuffer[pixel_id] = ASSERT_VALID(Radiance);
     return;
 }
 
@@ -271,7 +306,8 @@ extern "C" GLOBAL void __closesthit__fetch_hitinfo() {
 	hitInfo.SbtDataPtr = ((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;
 	hitInfo.TriangleCentroidCoord = optixGetTriangleBarycentrics();
 	hitInfo.surfaceType = ((ModelData*)hitInfo.SbtDataPtr)->MaterialData->MaterialType == MaterialType::MATERIAL_OBJ ? Opaque : Opaque;
-	SetPayLoad(hitInfo);
+    hitInfo.T = optixGetRayTmax();
+    SetPayLoad(hitInfo);
 }
 
 extern "C" GLOBAL void __miss__fetchMissInfo()
@@ -281,6 +317,7 @@ extern "C" GLOBAL void __miss__fetchMissInfo()
 	hitInfo.SbtDataPtr = optixGetSbtDataPointer();
 	hitInfo.TriangleCentroidCoord = make_float2(0.0f);
 	hitInfo.surfaceType = Miss;
+    hitInfo.T = optixGetRayTmax();
 	SetPayLoad(hitInfo);
 }
 
@@ -322,5 +359,16 @@ extern "C" GLOBAL void __closesthit__light() {
 	hitInfo.SbtDataPtr = ((SbtDataStruct*)optixGetSbtDataPointer())->DataPtr;
 	hitInfo.TriangleCentroidCoord = make_float2(0, 0);
 	hitInfo.surfaceType = SurfaceType::Light;
+    hitInfo.T = optixGetRayTmax();
 	SetPayLoad(hitInfo);
+}
+
+extern "C" __global__ void __exception__()
+{
+    const unsigned int code = optixGetExceptionCode();
+    const uint3 idx = optixGetLaunchIndex();
+
+
+    printf("EXCEPTION code=%u at (%u,%u,%u)\n",
+        code, idx.x, idx.y, idx.z);
 }
